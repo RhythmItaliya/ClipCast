@@ -6,6 +6,17 @@ import { inngest } from "~/inngest/client";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 
+async function sendInngestEvent(
+  name: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await inngest.send({ name, data });
+  } catch (err) {
+    console.warn(`[inngest] send "${name}" failed (non-fatal):`, err);
+  }
+}
+
 export async function processVideo(
   uploadedFileId: string,
   clipMode = "qa",
@@ -21,19 +32,16 @@ export async function processVideo(
 
   if (uploadedVideo.uploaded) return;
 
-  await inngest.send({
-    name: "process-video-events",
-    data: {
-      uploadedFileId: uploadedVideo.id,
-      userId: uploadedVideo.userId,
-      clipMode,
-      previewOnly,
-    },
-  });
-
   await db.uploadedFile.update({
     where: { id: uploadedFileId },
     data: { uploaded: true, clipMode, isPreview: previewOnly },
+  });
+
+  await sendInngestEvent("process-video-events", {
+    uploadedFileId: uploadedVideo.id,
+    userId: uploadedVideo.userId,
+    clipMode,
+    previewOnly,
   });
 
   revalidatePath("/dashboard");
@@ -59,6 +67,7 @@ export async function processYoutubeVideo(
 
   const folderKey = `${uuidv4()}/original.mp4`;
 
+  // Create the DB record first — job appears in queue immediately
   const record = await db.uploadedFile.create({
     data: {
       userId: session.user.id,
@@ -72,15 +81,12 @@ export async function processYoutubeVideo(
     select: { id: true },
   });
 
-  await inngest.send({
-    name: "process-video-events",
-    data: {
-      uploadedFileId: record.id,
-      userId: session.user.id,
-      youtubeUrl,
-      clipMode,
-      previewOnly,
-    },
+  await sendInngestEvent("process-video-events", {
+    uploadedFileId: record.id,
+    userId: session.user.id,
+    youtubeUrl,
+    clipMode,
+    previewOnly,
   });
 
   revalidatePath("/dashboard");
