@@ -55,18 +55,22 @@ export async function POST(req: NextRequest) {
     data: { status: "queued" },
   });
 
-  await inngest.send({
-    name: "process-video-events",
-    data: {
-      uploadedFileId: specificFile.id,
-      userId: specificFile.userId,
-      ...(specificFile.youtubeUrl
-        ? { youtubeUrl: specificFile.youtubeUrl }
-        : {}),
-      clipMode: "qa",
-      previewOnly: false,
-    },
-  });
+  try {
+    await inngest.send({
+      name: "process-video-events",
+      data: {
+        uploadedFileId: specificFile.id,
+        userId: specificFile.userId,
+        ...(specificFile.youtubeUrl
+          ? { youtubeUrl: specificFile.youtubeUrl }
+          : {}),
+        clipMode: "qa",
+        previewOnly: false,
+      },
+    });
+  } catch (err) {
+    console.warn("[reset-stuck-jobs] inngest.send failed (non-fatal):", err);
+  }
 
   return NextResponse.json({
     reset: 1,

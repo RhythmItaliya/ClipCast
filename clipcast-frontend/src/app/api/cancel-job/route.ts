@@ -51,12 +51,14 @@ export async function POST(req: NextRequest) {
     data: { status: "cancelled" },
   });
 
-  await inngest.send({
-    name: "cancel-job-events",
-    data: {
-      uploadedFileId: fileId,
-    },
-  });
+  try {
+    await inngest.send({
+      name: "cancel-job-events",
+      data: { uploadedFileId: fileId },
+    });
+  } catch (err) {
+    console.warn("[cancel-job] inngest.send failed (non-fatal):", err);
+  }
 
   return NextResponse.json({
     cancelled: true,
