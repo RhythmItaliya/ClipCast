@@ -1,0 +1,5 @@
+{
+  "python.defaultInterpreterPath": "clipcast-backend/.venv/bin/python",
+  "python.analysis.extraPaths": ["clipcast-backend/pipeline", "clipcast-backend"],
+  "python.analysis.diagnosticMode": "openFilesOnly"
+}
