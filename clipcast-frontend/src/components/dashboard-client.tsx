@@ -685,17 +685,6 @@ export function DashboardClient({
                 Supports standard YouTube URLs, shortened <code>youtu.be</code>{" "}
                 links, and YouTube Shorts.
               </p>
-
-              <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3">
-                <p className="flex items-center gap-2 text-xs text-yellow-800">
-                  <span className="font-bold"> Notice :</span> YouTube downloads
-                  may be blocked in cloud environments due to IP restrictions.{" "}
-                  <span className="font-semibold underline">
-                    This feature works perfectly in the local environment.
-                  </span>
-                </p>
-              </div>
-
               {/* Queue status is visible here too */}
               <QueueStatusTable />
             </CardContent>
