@@ -20,12 +20,12 @@ import { signupSchema, type SignupFormValues } from "~/schemas/auth";
 import { signUp } from "~/actions/auth";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 export function SignupForm({
   className,
   ...props
 }: React.ComponentPropsWithoutRef<"div">) {
-  const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
 
@@ -38,29 +38,18 @@ export function SignupForm({
   const onSubmit = async (data: SignupFormValues) => {
     try {
       setIsSubmitting(true);
-      setError(null);
 
       const result = await signUp(data);
+
       if (!result.success) {
-        setError(result.error ?? "An error occurred during signup");
+        toast.error(result.error ?? "An error occurred during signup");
         return;
       }
 
-      const signUpResult = await signIn("credentials", {
-        email: data.email,
-        password: data.password,
-        redirect: false,
-      });
-
-      if (signUpResult?.error) {
-        setError(
-          "Account created but couldn't sign in automatically. Please try again.",
-        );
-      } else {
-        router.push("/dashboard");
-      }
+      toast.success("Registered successfully! Please log in.");
+      router.push("/login");
     } catch {
-      setError("An unexpected error occurred");
+      toast.error("An unexpected error occurred. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -83,7 +72,7 @@ export function SignupForm({
                 <Input
                   id="email"
                   type="email"
-                  placeholder="m@example.com"
+                  placeholder="Enter your email"
                   required
                   {...register("email")}
                 />
@@ -98,6 +87,7 @@ export function SignupForm({
                 <Input
                   id="password"
                   type="password"
+                  placeholder="Enter your password"
                   required
                   {...register("password")}
                 />
@@ -107,12 +97,6 @@ export function SignupForm({
                   </p>
                 )}
               </div>
-
-              {error && (
-                <p className="rounded-md bg-red-50 p-3 text-sm text-red-500">
-                  {error}
-                </p>
-              )}
 
               <Button type="submit" className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? "Signing up..." : "Sign up"}
