@@ -55,7 +55,7 @@ one-time cost per container instead of a per-request cost:
 
 ```python
 @app.cls(
-    gpu="L40S", cpu=4.0, memory=16384, timeout=3600,
+    gpu="L40S", cpu=4.0, memory=16384, timeout=14400,  # 4h, long podcasts need real headroom
     retries=0,           # a partially-rendered clip should never be silently retried
     max_containers=2,
     scaledown_window=120,

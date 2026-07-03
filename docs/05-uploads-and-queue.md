@@ -7,7 +7,7 @@ Two ways to submit a job, one queue that handles both.
 1. Client asks `generateUploadUrl()` (`src/actions/s3.ts`) for a place to put
    the file. This action: validates the file server-side
    (`validateUploadFile()` in `src/server/usage.ts`: extension, content type,
-   500MB max, from `src/lib/limits.ts`), checks usage limits
+   4GB max, from `src/lib/limits.ts`), checks usage limits
    (`checkUsageLimits()`, see below), creates an `UploadedFile` row
    (`uploaded: false`), and returns a **presigned S3 PUT URL** (10 min expiry).
 2. The browser uploads the file straight to S3 using that URL; the file never
