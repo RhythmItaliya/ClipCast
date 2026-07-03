@@ -22,7 +22,9 @@ export const env = createEnv({
     AUTH_DISCORD_ID: z.string(),
     AUTH_DISCORD_SECRET: z.string(),
     PROCESS_VIDEO_ENDPOINT: z.string(),
-    DOWNLOAD_VIDEO_ENDPOINT: z.string(),
+    // Optional at app startup so a missing backend URL cannot take down the
+    // entire frontend. YouTube jobs report a targeted configuration error.
+    DOWNLOAD_VIDEO_ENDPOINT: z.string().url().optional(),
     PROCESS_VIDEO_ENDPOINT_AUTH: z.string(),
     STRIPE_SECRET_KEY: z.string(),
     STRIPE_SMALL_CREDIT_PACK: z.string(),

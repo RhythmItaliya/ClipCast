@@ -112,34 +112,54 @@ export const processVideoFn = inngest.createFunction(
         // consumes local CPU, RAM, GPU, disk, or bandwidth.
 
         if (youtubeUrl) {
-          const downloadResponse = await step.fetch(
-            env.DOWNLOAD_VIDEO_ENDPOINT,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                youtube_url: youtubeUrl,
-                s3_key: s3Key,
-              }),
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${env.PROCESS_VIDEO_ENDPOINT_AUTH}`,
-              },
-            },
-          );
-
-          if (!downloadResponse.ok) {
-            const body = (await downloadResponse.text().catch(() => "")).slice(
-              0,
-              800,
-            );
+          if (!env.DOWNLOAD_VIDEO_ENDPOINT) {
             throw new Error(
-              `YTDLP_ERROR: Cloud YouTube downloader returned ${downloadResponse.status}: ${body}`,
+              "YTDLP_ERROR: DOWNLOAD_VIDEO_ENDPOINT is not configured.",
             );
           }
 
-          const downloadData = (await downloadResponse.json()) as {
-            duration?: number;
-          };
+          const submitted = await step.run(
+            "submit-youtube-download",
+            async () =>
+              postCloudDownloader({
+                youtube_url: youtubeUrl,
+                s3_key: s3Key,
+              }),
+          );
+
+          const callId = submitted.data.call_id;
+          if (submitted.httpStatus !== 202 || !callId) {
+            throw new Error(
+              `YTDLP_ERROR: Could not submit cloud download (${submitted.httpStatus}): ${submitted.body.slice(0, 800)}`,
+            );
+          }
+
+          let downloadData: CloudDownloaderResponse | undefined;
+          for (let attempt = 0; attempt < 120; attempt += 1) {
+            await step.sleep(`wait-youtube-download-${attempt}`, "15s");
+
+            const polled = await step.run(
+              `poll-youtube-download-${attempt}`,
+              async () => postCloudDownloader({ call_id: callId }),
+            );
+
+            if (polled.httpStatus === 202) continue;
+            if (polled.httpStatus < 200 || polled.httpStatus >= 300) {
+              throw new Error(
+                `YTDLP_ERROR: Cloud download failed (${polled.httpStatus}): ${polled.body.slice(0, 800)}`,
+              );
+            }
+
+            downloadData = polled.data;
+            break;
+          }
+
+          if (!downloadData) {
+            throw new Error(
+              "YTDLP_ERROR: Cloud download did not finish within 30 minutes.",
+            );
+          }
+
           if (downloadData.duration && downloadData.duration > 0) {
             durationSeconds = downloadData.duration;
           }
@@ -344,4 +364,42 @@ async function listS3ObjectsByPrefix(prefix: string) {
 
   const response = await s3Client.send(listCommand);
   return response.Contents?.map((item) => item.Key).filter(Boolean) ?? [];
+}
+
+type CloudDownloaderResponse = {
+  status?: string;
+  call_id?: string;
+  duration?: number;
+  detail?: string;
+};
+
+async function postCloudDownloader(payload: {
+  youtube_url?: string;
+  s3_key?: string;
+  call_id?: string;
+}): Promise<{
+  httpStatus: number;
+  data: CloudDownloaderResponse;
+  body: string;
+}> {
+  if (!env.DOWNLOAD_VIDEO_ENDPOINT) {
+    throw new Error("DOWNLOAD_VIDEO_ENDPOINT is not configured");
+  }
+
+  const response = await fetch(env.DOWNLOAD_VIDEO_ENDPOINT, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${env.PROCESS_VIDEO_ENDPOINT_AUTH}`,
+    },
+  });
+  const body = await response.text();
+  let data: CloudDownloaderResponse = {};
+  try {
+    data = JSON.parse(body) as CloudDownloaderResponse;
+  } catch {
+    // Preserve the raw body for the error reported to the job record.
+  }
+  return { httpStatus: response.status, data, body };
 }

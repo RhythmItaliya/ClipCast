@@ -9,7 +9,7 @@
     "db:studio": "prisma studio",
     "db:push": "prisma db push",
     "build": "prisma db push && next build",
-    "check": "next lint && tsc --noEmit",
+    "check": "eslint . && tsc --noEmit",
     "db:generate": "prisma migrate dev",
     "db:migrate": "prisma migrate deploy",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mdx}\" --cache",

@@ -45,6 +45,7 @@ model Account {
     refresh_token_expires_in Int?
 
     @@unique([provider, providerAccountId])
+    @@index([userId])
 }
 
 model Session {
@@ -53,6 +54,8 @@ model Session {
     userId       String
     expires      DateTime
     user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId])
 }
 
 model User {
@@ -98,6 +101,10 @@ model UploadedFile {
     userId String
 
     @@index([s3Key])
+    // Dashboard list + rolling 24h upload count
+    @@index([userId, createdAt])
+    // Active-job counts for usage limits and queue status
+    @@index([userId, status])
 }
 
 model Clip {
@@ -116,6 +123,8 @@ model Clip {
     userId String
 
     @@index([s3Key])
+    @@index([userId])
+    @@index([uploadedFileId])
 }
 
 model VerificationToken {

@@ -15,6 +15,15 @@ nextEnv.loadEnvConfig(
 await import("./src/env.js");
 
 /** @type {import("next").NextConfig} */
-const config = {};
+const config = {
+  experimental: {
+    // Keep builds responsive on a development laptop instead of spawning one
+    // worker per logical CPU (this machine previously spawned 15 workers).
+    cpus: 4,
+    staticGenerationMaxConcurrency: 4,
+    // Reuse Turbopack artifacts across production-build verification runs.
+    turbopackFileSystemCacheForBuild: true,
+  },
+};
 
 export default config;
