@@ -47,7 +47,11 @@ LOCAL_PROXY_JSON = pathlib.Path("/opt/proxy.json")
 VOLUME_MOUNT = pathlib.Path("/proxies")
 SHARED_PROXY_JSON = VOLUME_MOUNT / "proxy.json"
 PROXY_MAX_AGE_SECONDS = 60 * 60  # schedule refreshes every 15 min
-OVERALL_DEADLINE_SECONDS = 1500
+# A multi-hour source video is a multi-GB file through a rotating free
+# proxy; 1500s (25 min) was only enough for shorter videos. Raised to 1
+# hour, with the Modal function timeout below and the Inngest poll cap
+# (MAX_POLL_ATTEMPTS in src/inngest/functions.ts) raised to match.
+OVERALL_DEADLINE_SECONDS = 3600
 
 # Same markers yt-dlp-proxy uses to decide a proxy is burnt (execute_yt_dlp_command),
 # plus common transport failures.
@@ -181,7 +185,9 @@ def _finished_files(base_dir: pathlib.Path) -> list[pathlib.Path]:
 @app.function(
     cpu=2.0,
     memory=4096,
-    timeout=1800,
+    # A little above OVERALL_DEADLINE_SECONDS (3600s) so there's headroom to
+    # upload the finished file to S3 after the download itself completes.
+    timeout=3900,
     retries=1,
     max_containers=4,
     scaledown_window=60,

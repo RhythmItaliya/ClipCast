@@ -549,7 +549,15 @@ def process_clip(base_dir, original_video_path, s3_key, start_time, end_time, cl
     gpu="L40S",
     cpu=4.0,
     memory=16384,
-    timeout=3600,
+    # 1 hour was only enough for shorter (~30 min) sources — WhisperX
+    # transcription time scales with source length, so a multi-hour podcast
+    # needs real headroom here. Raised to 4 hours of wall-clock PROCESSING
+    # time, comfortably above the realistic worst case for a 4-hour source
+    # (LIMITS.MAX_DURATION_MINUTES in clipcast-frontend/src/lib/limits.ts):
+    # transcription scales with source length but runs well faster than
+    # realtime on an L40S, and per-clip ASD/render time is bounded by the
+    # (fixed, capped-at-12) clip count, not the source length.
+    timeout=14400,
     retries=0,
     max_containers=2,
     scaledown_window=120,
