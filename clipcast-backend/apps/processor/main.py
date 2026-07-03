@@ -171,6 +171,14 @@ image = (
         "    https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf",
         "fc-cache -f -v",
     ])
+    # Mount model volumes outside paths that image-build dependencies may
+    # populate. Modal rejects Volume mounts over non-empty image directories.
+    .env({
+        "TORCH_HOME": "/model-cache/torch",
+        "HF_HOME": "/model-cache/huggingface",
+        "HUGGINGFACE_HUB_CACHE": "/model-cache/huggingface/hub",
+        "TRANSFORMERS_CACHE": "/model-cache/huggingface/transformers",
+    })
     .add_local_dir("asd", "/asd", copy=True)
 )
 
@@ -183,8 +191,8 @@ hf_volume = modal.Volume.from_name(
     "clipcast-huggingface-cache", create_if_missing=True
 )
 
-mount_path = "/root/.cache/torch"
-hf_cache_path = "/root/.cache/huggingface"
+mount_path = "/model-cache/torch"
+hf_cache_path = "/model-cache/huggingface"
 
 auth_scheme = HTTPBearer()
 

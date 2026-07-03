@@ -1,53 +1,63 @@
-# ClipCast backend (Modal)
+# ClipCast Modal backend
 
-GPU video-processing worker: S3 (or YouTube) download → WhisperX transcription →
-Gemini moment selection → TalkNet active-speaker vertical crop → subtitled clip
-render → S3 upload. All heavy compute runs on **Modal**, never locally.
+ClipCast uses two independently deployed Modal apps. Local development runs only
+Next.js and Inngest; video downloads and GPU processing stay in Modal.
 
-## Layout
+## Services
 
 ```
 clipcast-backend/
-├── pipeline/                 the deployed Modal app — DEPLOY FROM HERE
-│   ├── main.py               Modal entrypoint: FastAPI endpoint + pipeline
-│   ├── asd/                  TalkNet active-speaker detection (vendored, inference-only)
-│   └── requirements.txt      image dependencies
+├── apps/
+│   ├── processor/             clipcast (L40S GPU)
+│   │   ├── main.py
+│   │   ├── requirements.txt
+│   │   ├── asd/
+│   │   └── deploy.sh
+│   └── downloader/            clipcast-downloader (CPU)
+│       ├── main.py
+│       └── deploy.sh
 ├── scripts/
-│   └── setup_modal_secret.py push .env values into the Modal Secret
-└── .venv/ , venv/            local virtualenvs (gitignored)
+│   └── setup_modal_secret.py
+└── deploy.sh                  deploy one service or both
 ```
 
-> **Why `requirements.txt` and `asd/` live inside `pipeline/`:** Modal resolves
-> `pip_install_from_requirements("requirements.txt")` and
-> `add_local_dir("asd", ...)` relative to the directory you run `modal deploy`
-> from. Keeping them beside `main.py` and deploying from `pipeline/` keeps those
-> relative paths valid.
+The app names are intentionally stable so redeployment updates the existing
+Modal apps and preserves the frontend endpoint URLs.
 
-## Deploy
+## Deployment
 
 ```bash
-cd clipcast-backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r pipeline/requirements.txt
+# Both services
+./clipcast-backend/deploy.sh all
 
-# One-time (or whenever .env changes): create/update the Modal secret
-python scripts/setup_modal_secret.py
-
-# Deploy / redeploy
-cd pipeline && modal deploy main.py
+# One service only
+./clipcast-backend/deploy.sh processor
+./clipcast-backend/deploy.sh downloader
 ```
 
-## Input paths
+Each service can also be deployed from its own directory:
 
-- **File upload (primary):** the frontend uploads the source video to S3; Modal
-  downloads it from S3 and processes it. Reliable and fully cloud.
-- **YouTube URL:** a CPU-only Modal function downloads up to 4K via `yt-dlp`
-  (with Deno's n-challenge solver), remuxes without re-encoding, and uploads
-  directly to S3. The L40S starts only after this succeeds. YouTube blocks
-  datacenter IPs, so a **residential** `YT_DLP_PROXY` is required.
+```bash
+./clipcast-backend/apps/processor/deploy.sh
+./clipcast-backend/apps/downloader/deploy.sh
+```
 
-## Secret keys (`clipcast-secret`)
+Before the first deployment, copy the required values from the root `.env` to
+the shared Modal secret:
 
-`GEMINI_API_KEY`, `PROCESS_VIDEO_ENDPOINT_AUTH`, `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_NAME`, and optionally
-`YT_DLP_PROXY` (required for the YouTube-URL path).
+```bash
+./clipcast-backend/.venv/bin/python clipcast-backend/scripts/setup_modal_secret.py
+```
+
+Required secret values are `GEMINI_API_KEY`, `PROCESS_VIDEO_ENDPOINT_AUTH`,
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and
+`S3_BUCKET_NAME`. `YT_DLP_PROXY` is optional but a reliable residential proxy is
+recommended for YouTube.
+
+## Data flow
+
+1. `clipcast-downloader` receives a YouTube URL, downloads remotely, and uploads
+   the original source directly to S3.
+2. `clipcast` downloads the S3 object inside Modal, transcribes and renders on
+   an L40S GPU, uploads the clips to S3, and removes temporary container files.
+3. The user's computer only runs the frontend and local event orchestration.

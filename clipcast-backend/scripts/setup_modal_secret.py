@@ -10,7 +10,7 @@ Usage (from anywhere):
     python clipcast-backend/scripts/setup_modal_secret.py
 
 Then deploy:
-    cd clipcast-backend/pipeline && modal deploy main.py
+    clipcast-backend/deploy.sh all
 
 Paths are resolved relative to this file, so the current working directory does
 not matter.
@@ -26,7 +26,7 @@ from dotenv import dotenv_values
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENV_PATH = REPO_ROOT / ".env"
 
-# Keys the deployed backend (pipeline/main.py) actually reads via os.environ.
+# Keys the deployed services under apps/ actually read via os.environ.
 REQUIRED_KEYS = [
     "GEMINI_API_KEY",
     "PROCESS_VIDEO_ENDPOINT_AUTH",  # bearer token checked by the endpoint
