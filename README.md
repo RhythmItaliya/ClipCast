@@ -1,16 +1,36 @@
 # ClipCast
 
+<div align="center">
+
+![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=next.js&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![Prisma](https://img.shields.io/badge/Prisma-2D3748?style=for-the-badge&logo=prisma&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/Postgres-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white)
+![NextAuth](https://img.shields.io/badge/Auth.js-000000?style=for-the-badge&logo=auth0&logoColor=white)
+![TailwindCSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
+![Stripe](https://img.shields.io/badge/Stripe-635BFF?style=for-the-badge&logo=stripe&logoColor=white)
+![Inngest](https://img.shields.io/badge/Inngest-000000?style=for-the-badge&logo=inngest&logoColor=white)
+![Modal](https://img.shields.io/badge/Modal-00D2B8?style=for-the-badge)
+![AWS S3](https://img.shields.io/badge/AWS_S3-569A31?style=for-the-badge&logo=amazons3&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FFmpeg](https://img.shields.io/badge/FFmpeg-007808?style=for-the-badge&logo=ffmpeg&logoColor=white)
+![Google Gemini](https://img.shields.io/badge/Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white)
+
+</div>
+
 ClipCast is an AI podcast clipper. Upload a long-form video, or just paste a
-YouTube link, and it hands back a set of short vertical clips — automatically
+YouTube link, and it hands back a set of short vertical clips: automatically
 transcribed, automatically selected by an LLM, captioned, and reframed to
-9:16 — ready to post as Shorts, Reels, or TikToks.
+9:16, ready to post as Shorts, Reels, or TikToks.
 
 The project is split into two halves:
 
-- **The web app** — the Next.js frontend, in the `clipcast-frontend` folder.
+- **The web app**, the Next.js frontend, in the `clipcast-frontend` folder.
   It handles sign-in, billing, uploads, and the admin panel. See
   [clipcast-frontend/README.md](clipcast-frontend/README.md).
-- **The processing backend** — a Python service that runs on Modal's cloud
+- **The processing backend**, a Python service that runs on Modal's cloud
   GPUs, in the `clipcast-backend` folder. It downloads the video, transcribes
   it, picks the best moments, and renders the final clips. See
   [clipcast-backend/README.md](clipcast-backend/README.md).
@@ -26,7 +46,7 @@ The project is split into two halves:
    ```bash
    pip install -r clipcast-backend/requirements.txt
    ```
-3. Copy the environment template and fill in real values — see
+3. Copy the environment template and fill in real values. See
    [docs/01-environment-and-accounts.md](docs/01-environment-and-accounts.md)
    for what every value is and where to get it:
    ```bash
@@ -37,9 +57,9 @@ The project is split into two halves:
    ./start.sh
    ```
 
-`start.sh` launches the frontend and its background job worker together — it
-never runs the video-processing backend locally (that always runs on Modal's
-cloud, even in development).
+`start.sh` launches the frontend and its background job worker together. It
+never runs the video-processing backend locally; that always runs on Modal's
+cloud, even in development.
 
 | Service | Address |
 |---|---|
@@ -57,18 +77,18 @@ testing (sign in at `/login`):
 | Admin (`/admin`) | `admin@clipcast.dev` | `ClipCast2026!` |
 | Regular user | `user@clipcast.dev` | `ClipCast2026!` |
 
-Both start with credits already loaded (100 for the admin, 10 for the user)
+Both start with credits already loaded (100 for the admin, 10 for the user),
 so you can submit a job right away. The S3 bucket was also emptied, so the
 first upload/clip you generate will be the only thing in it.
 
 ## Learn how it all works
 
 Never seen this codebase before? [docs/](docs/) is a staged, numbered
-walkthrough of the whole system, written to be read start to finish — begin
+walkthrough of the whole system, written to be read start to finish. Begin
 at [docs/00-overview.md](docs/00-overview.md).
 
 Prefer pictures? [docs/excalidraw/](docs/excalidraw/) has one diagram per
-major flow — the overall system design, the processing pipeline, credits and
+major flow: the overall system design, the processing pipeline, credits and
 billing, video processing, and YouTube ingestion. [docs/diagrams/](docs/diagrams/)
-has the formal diagram set — use case, system architecture, flowchart,
-activity, sequence, class, ER, and data flow (Level 0 + Level 1).
+has the formal diagram set: use case, system architecture, flowchart,
+activity, sequence, class, ER, and data flow (Level 0 and Level 1).
