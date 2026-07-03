@@ -69,6 +69,42 @@ export async function getClipUrl(
   }
 }
 
+/**
+ * Presigned GET URLs for a batch of the caller's own clips' thumbnails.
+ * Clips with no `thumbnailS3Key` (rendered before this feature existed) are
+ * skipped — the UI falls back to a placeholder for those.
+ */
+export async function getClipThumbnailUrls(
+  clipIds: string[],
+): Promise<Record<string, string>> {
+  const session = await auth();
+  if (!session?.user?.id || clipIds.length === 0) return {};
+
+  const clips = await db.clip.findMany({
+    where: { id: { in: clipIds }, userId: session.user.id, thumbnailS3Key: { not: null } },
+    select: { id: true, thumbnailS3Key: true },
+  });
+
+  const client = s3Client();
+  const entries = await Promise.all(
+    clips.map(async (clip) => {
+      try {
+        const url = await getSignedUrl(
+          client,
+          new GetObjectCommand({ Bucket: env.S3_BUCKET_NAME, Key: clip.thumbnailS3Key! }),
+          { expiresIn: 3600 },
+        );
+        return [clip.id, url] as const;
+      } catch (err) {
+        console.error("[clips] getClipThumbnailUrls failed for", clip.id, err);
+        return null;
+      }
+    }),
+  );
+
+  return Object.fromEntries(entries.filter((e): e is readonly [string, string] => e !== null));
+}
+
 type ActionResult = { success: boolean; error?: string };
 
 /** Delete a clip: removes the S3 object (best-effort) and the DB record. */

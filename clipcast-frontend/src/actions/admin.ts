@@ -310,6 +310,8 @@ export async function getAdminClips(page = 1, pageSize = 30) {
         s3Key: true,
         clipMode: true,
         isPreview: true,
+        title: true,
+        duration: true,
         createdAt: true,
         user: { select: { id: true, email: true, name: true } },
         uploadedFile: { select: { displayName: true } },

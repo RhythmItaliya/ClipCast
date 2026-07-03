@@ -1,10 +1,6 @@
 import { env } from "~/env";
 import { inngest } from "./client";
 import { db } from "~/server/db";
-import {
-  ListObjectsV2Command,
-  S3Client,
-} from "@aws-sdk/client-s3";
 
 // ── Video Processing ────────────────────────────────────────────────────────
 export const processVideoFn = inngest.createFunction(
@@ -237,6 +233,12 @@ export const processVideoFn = inngest.createFunction(
           clips_found?: number;
           clips_rendered?: number;
           clip_warnings?: string[];
+          clips?: {
+            s3_key: string;
+            thumbnail_s3_key?: string;
+            title?: string;
+            duration?: number;
+          }[];
         };
 
         // Log any per-clip render warnings (non-fatal) for debugging
@@ -264,21 +266,18 @@ export const processVideoFn = inngest.createFunction(
         });
 
         await step.run("create-clips-in-db", async () => {
-          const folderPrefix = s3Key.split("/")[0]!;
-          const allKeys = await listS3ObjectsByPrefix(folderPrefix);
-          const clipKeys = allKeys.filter(
-            (key): key is string =>
-              key !== undefined && !key.endsWith("original.mp4"),
-          );
-
-          if (clipKeys.length > 0) {
+          const clips = modalData.clips ?? [];
+          if (clips.length > 0) {
             await db.clip.createMany({
-              data: clipKeys.map((clipKey) => ({
-                s3Key: clipKey,
+              data: clips.map((clip) => ({
+                s3Key: clip.s3_key,
+                thumbnailS3Key: clip.thumbnail_s3_key ?? null,
+                title: clip.title || null,
+                duration: clip.duration ?? null,
                 uploadedFileId,
                 userId,
                 clipMode,
-                isPreview: previewOnly || clipKey.includes("preview_"),
+                isPreview: previewOnly,
               })),
             });
           }
@@ -412,24 +411,6 @@ export const syncInngestCancellation = inngest.createFunction(
 );
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-async function listS3ObjectsByPrefix(prefix: string) {
-  const s3Client = new S3Client({
-    region: env.AWS_REGION,
-    credentials: {
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-    },
-  });
-
-  const listCommand = new ListObjectsV2Command({
-    Bucket: env.S3_BUCKET_NAME,
-    Prefix: prefix,
-  });
-
-  const response = await s3Client.send(listCommand);
-  return response.Contents?.map((item) => item.Key).filter(Boolean) ?? [];
-}
-
 type CloudDownloaderResponse = {
   status?: string;
   call_id?: string;
