@@ -5,3 +5,6 @@ export { CardSkeleton } from "./card-skeleton";
 export { ClipsGridSkeleton } from "./clips-grid-skeleton";
 export { PricingSkeleton } from "./pricing-skeleton";
 export { ProfileSkeleton } from "./profile-skeleton";
+export { AdminTableSkeleton } from "./admin-table-skeleton";
+export { AdminStatGridSkeleton } from "./admin-stat-grid-skeleton";
+export { AdminUserDetailSkeleton } from "./admin-user-detail-skeleton";
