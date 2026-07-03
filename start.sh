@@ -75,7 +75,7 @@ if [[ "${1:-}" == "--deploy" ]]; then
     # shellcheck disable=SC1091
     source "$BACKEND/.venv/bin/activate"
   fi
-  ( cd "$BACKEND/pipeline" && modal deploy main.py )
+  "$BACKEND/deploy.sh" all
 fi
 
 # ── Install frontend deps if missing ──────────────────────────────────────────

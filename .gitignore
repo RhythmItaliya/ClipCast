@@ -51,3 +51,6 @@ clipcast-backend/env/
 # ── Local tooling binaries (downloaded Stripe CLI) ────────────
 /stripe
 
+# ── Personal / reference folder ──────────────────────────────
+/ClipCast_by_me/
+
