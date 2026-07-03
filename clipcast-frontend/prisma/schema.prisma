@@ -81,12 +81,51 @@ model User {
 
     uploadedFiles UploadedFile[]
     clips Clip[]
+    purchases Purchase[]
+    auditLogs AdminAuditLog[] @relation("AuditActor")
 
     youtubeChannelId    String?
     youtubeChannelName  String?
     youtubeAccessToken  String?
     youtubeRefreshToken String?
     youtubeTokenExpiry  DateTime?
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @default(now()) @updatedAt
+}
+
+model Purchase {
+    id               String   @id @default(cuid())
+    userId           String
+    user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    stripeSessionId  String   @unique
+    stripeCustomerId String?
+    priceId          String
+    pack             String   // "small" | "medium" | "large"
+    credits          Int
+    amountTotal      Int      // cents
+    currency         String
+    createdAt        DateTime @default(now())
+
+    @@index([userId])
+}
+
+// Tracks admin mutations (credit adjustments, bans, role changes, job resets, clip
+// deletes). adminId is nullable + SetNull so the trail survives if the acting admin's
+// account is later deleted; adminEmail is denormalized for the same reason.
+model AdminAuditLog {
+    id         String   @id @default(cuid())
+    adminId    String?
+    admin      User?    @relation("AuditActor", fields: [adminId], references: [id], onDelete: SetNull)
+    adminEmail String
+    action     String
+    targetType String
+    targetId   String?
+    detail     String?
+    createdAt  DateTime @default(now())
+
+    @@index([adminId])
+    @@index([createdAt])
 }
 
 model UploadedFile {
