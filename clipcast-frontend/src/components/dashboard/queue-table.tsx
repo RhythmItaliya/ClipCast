@@ -119,15 +119,31 @@ export function QueueTable({
     }
   }, []);
 
-  // Auto-poll every 10 seconds while any job is still in progress
+  // Auto-poll while any job is still in progress.
+  // Use adaptive intervals: 10s for recently-submitted jobs (likely queued or
+  // in the download phase), 30s for jobs that have been processing for a while
+  // (GPU rendering can take 5-20 min — no need to hammer the DB every 10s).
   const hasActiveJobs = files.some(
     (f) => f.status === "queued" || f.status === "processing",
   );
+  const oldestActiveUpdatedAt = hasActiveJobs
+    ? Math.min(
+        ...files
+          .filter((f) => f.status === "queued" || f.status === "processing")
+          .map((f) => new Date(f.updatedAt).getTime()),
+      )
+    : null;
+  const activeJobAgeMs =
+    oldestActiveUpdatedAt != null ? Date.now() - oldestActiveUpdatedAt : 0;
+  // < 2 min since last status update → poll every 10s (fast feedback for downloads)
+  // >= 2 min → poll every 30s (GPU processing — no rush)
+  const pollIntervalMs = activeJobAgeMs < 2 * 60 * 1000 ? 10_000 : 30_000;
+
   useEffect(() => {
     if (!hasActiveJobs) return;
-    const interval = setInterval(() => void fetchQueueStatus(), 10_000);
+    const interval = setInterval(() => void fetchQueueStatus(), pollIntervalMs);
     return () => clearInterval(interval);
-  }, [hasActiveJobs, fetchQueueStatus]);
+  }, [hasActiveJobs, pollIntervalMs, fetchQueueStatus]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
