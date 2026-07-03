@@ -66,10 +66,13 @@ ClipCast/
 
 ## Diagrams
 
-[`docs/excalidraw/`](excalidraw/) has one Excalidraw file per major flow —
-system design, pipeline overview, credits/billing, video processing, YouTube
-ingestion — each numbered to match the doc stages below. See
-[`docs/excalidraw/README.md`](excalidraw/README.md) for what's in each one.
+- [`docs/excalidraw/`](excalidraw/) — one informal architecture diagram per
+  major flow (system design, pipeline overview, credits/billing, video
+  processing, YouTube ingestion), each numbered to match the doc stages
+  below. See [`docs/excalidraw/README.md`](excalidraw/README.md).
+- [`docs/diagrams/`](diagrams/) — the formal diagram set: use case, system
+  architecture, flowchart, activity, sequence, class, ER, and data flow
+  (Level 0 + Level 1). See [`docs/diagrams/README.md`](diagrams/README.md).
 
 ## Reading order
 
