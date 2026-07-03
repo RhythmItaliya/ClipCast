@@ -39,7 +39,9 @@ export function SignupForm({
       const result = await signUp(data);
 
       if (!result.success) {
-        toast.error(result.error ?? "An error occurred during signup");
+        toast.error("Signup failed", {
+          description: result.error ?? "Something unexpected went wrong. Please try again.",
+        });
         return;
       }
 
@@ -48,9 +50,10 @@ export function SignupForm({
       });
       router.push("/login");
     } catch {
-      toast.error(
-        isOffline() ? FRIENDLY_MESSAGES.offline : FRIENDLY_MESSAGES.network,
-      );
+      toast.error("Signup failed", {
+        description:
+          isOffline() ? FRIENDLY_MESSAGES.offline : FRIENDLY_MESSAGES.network,
+      });
     } finally {
       setIsSubmitting(false);
     }

@@ -109,6 +109,9 @@ start_service() {
   pids+=("$!")
 }
 
+echo "==> Clearing stuck local jobs (if any)..."
+(cd "$FRONTEND" && npx -y tsx prisma/reset-stuck-jobs.ts || true)
+
 echo "==> Starting Inngest dev worker  -> http://localhost:8288"
 start_service "$FRONTEND" npm run inngest-dev
 required_pids+=("${pids[-1]}")
