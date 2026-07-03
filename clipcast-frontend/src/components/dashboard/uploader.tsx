@@ -12,13 +12,14 @@ import { useRef, useState, type DragEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { processVideo, processYoutubeVideo } from "~/actions/generation";
 import { generateUploadUrl } from "~/actions/s3";
+import { useLiveUsage } from "~/components/dashboard/live-usage-stats";
 import {
   FRIENDLY_MESSAGES,
   getFriendlyErrorMessage,
   isOffline,
   messageForStatus,
 } from "~/lib/errors";
-import { getUsageBlockReason, LIMITS, type UsageStats } from "~/lib/limits";
+import { getUsageBlockReason, LIMITS } from "~/lib/limits";
 import { TOAST_DURATION_LONG, TOAST_DURATION_MEDIUM } from "~/lib/utils";
 
 const YT_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/;
@@ -31,7 +32,7 @@ const CLIP_MODES = [
   { id: "highlights", label: "Highlights" },
 ] as const;
 
-export function Uploader({ usage }: { usage: UsageStats }) {
+export function Uploader() {
   const [tab, setTab] = useState<"upload" | "youtube">("upload");
   const [preview, setPreview] = useState(false);
   const [mode, setMode] = useState("all");
@@ -43,7 +44,15 @@ export function Uploader({ usage }: { usage: UsageStats }) {
   const router = useRouter();
 
   // Client-side mirror of the server gates — instant feedback, server decides.
-  const blockReason = getUsageBlockReason(usage);
+  // Reads the same live-polled usage the queue table updates from, so a job
+  // that just finished frees up a slot here immediately, not just after a
+  // full page reload.
+  const live = useLiveUsage();
+  const blockReason = getUsageBlockReason({
+    creditsRemaining: live.credits,
+    uploadsToday: live.uploadsToday,
+    activeJobs: live.activeJobs,
+  });
 
   const pickFile = (candidate: File | undefined) => {
     if (!candidate) return;
