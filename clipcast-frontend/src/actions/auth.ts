@@ -2,6 +2,7 @@
 
 import { hashPassword } from "~/lib/auth";
 import { signupSchema, type SignupFormValues } from "~/schemas/auth";
+import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 import Stripe from "stripe";
 import { env } from "~/env";
@@ -64,5 +65,58 @@ export async function signUp(data: SignupFormValues): Promise<SignupResult> {
     return { success: true };
   } catch {
     return { success: false, error: "An error occurred during signup" };
+  }
+}
+
+type ActionResult = { success: boolean; error?: string };
+
+/** Update the signed-in user's display name. */
+export async function updateProfile(name: string): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      error: "Your session has expired. Please log in again.",
+    };
+  }
+
+  const trimmed = name.trim();
+  if (!trimmed) return { success: false, error: "Name can't be empty." };
+  if (trimmed.length > 100) {
+    return { success: false, error: "Name is too long (max 100 characters)." };
+  }
+
+  try {
+    await db.user.update({
+      where: { id: session.user.id },
+      data: { name: trimmed },
+    });
+    return { success: true };
+  } catch {
+    return { success: false, error: "Could not save your profile." };
+  }
+}
+
+/**
+ * Permanently delete the signed-in user's account. Uploaded files, clips,
+ * OAuth accounts and sessions are removed via cascading deletes.
+ */
+export async function deleteAccount(): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      error: "Your session has expired. Please log in again.",
+    };
+  }
+
+  try {
+    // Posts have no cascade rule on the user relation — clear them first.
+    await db.post.deleteMany({ where: { createdById: session.user.id } });
+    await db.user.delete({ where: { id: session.user.id } });
+    return { success: true };
+  } catch (err) {
+    console.error("[auth] deleteAccount failed:", err);
+    return { success: false, error: "Could not delete your account." };
   }
 }

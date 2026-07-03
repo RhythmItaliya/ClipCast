@@ -5,15 +5,35 @@ import { v4 as uuidv4 } from "uuid";
 import { inngest } from "~/inngest/client";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
+import { checkUsageLimits } from "~/server/usage";
 
-async function sendInngestEvent(
-  name: string,
+type ActionResult = { success: boolean; error?: string };
+
+/**
+ * Fire the processing event. If the queue is unreachable the job is marked
+ * failed immediately (with a friendly message) instead of sitting in
+ * "queued" forever — the user can retry it from the dashboard.
+ */
+async function sendProcessEvent(
+  uploadedFileId: string,
   data: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await inngest.send({ name, data });
+    await inngest.send({ name: "process-video-events", data });
+    return true;
   } catch (err) {
-    console.warn(`[inngest] send "${name}" failed (non-fatal):`, err);
+    console.error(`[inngest] send failed for ${uploadedFileId}:`, err);
+    await db.uploadedFile
+      .update({
+        where: { id: uploadedFileId },
+        data: {
+          status: "failed",
+          errorMessage:
+            "Could not reach the processing queue. Please retry in a moment.",
+        },
+      })
+      .catch(() => undefined);
+    return false;
   }
 }
 
@@ -21,23 +41,28 @@ export async function processVideo(
   uploadedFileId: string,
   clipMode = "qa",
   previewOnly = false,
-) {
+): Promise<ActionResult> {
   const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      error: "Your session has expired. Please log in again.",
+    };
+  }
 
   const uploadedVideo = await db.uploadedFile.findUniqueOrThrow({
     where: { id: uploadedFileId, userId: session.user.id },
     select: { uploaded: true, id: true, userId: true },
   });
 
-  if (uploadedVideo.uploaded) return;
+  if (uploadedVideo.uploaded) return { success: true };
 
   await db.uploadedFile.update({
     where: { id: uploadedFileId },
     data: { uploaded: true, clipMode, isPreview: previewOnly },
   });
 
-  await sendInngestEvent("process-video-events", {
+  const sent = await sendProcessEvent(uploadedVideo.id, {
     uploadedFileId: uploadedVideo.id,
     userId: uploadedVideo.userId,
     clipMode,
@@ -45,6 +70,13 @@ export async function processVideo(
   });
 
   revalidatePath("/dashboard");
+  return sent
+    ? { success: true }
+    : {
+        success: false,
+        error:
+          "Your video is uploaded, but the processing queue is unreachable. Use Retry on the job in a moment.",
+      };
 }
 
 /**
@@ -56,14 +88,23 @@ export async function processYoutubeVideo(
   youtubeUrl: string,
   clipMode = "qa",
   previewOnly = false,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<ActionResult> {
   const session = await auth();
-  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      error: "Your session has expired. Please log in again.",
+    };
+  }
 
   const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/;
   if (!ytRegex.test(youtubeUrl)) {
     return { success: false, error: "Please enter a valid YouTube URL." };
   }
+
+  // Same server-side gates as direct uploads: credits, daily cap, active jobs.
+  const limitError = await checkUsageLimits(session.user.id);
+  if (limitError) return { success: false, error: limitError };
 
   const folderKey = `${uuidv4()}/original.mp4`;
 
@@ -81,7 +122,7 @@ export async function processYoutubeVideo(
     select: { id: true },
   });
 
-  await sendInngestEvent("process-video-events", {
+  const sent = await sendProcessEvent(record.id, {
     uploadedFileId: record.id,
     userId: session.user.id,
     youtubeUrl,
@@ -90,14 +131,23 @@ export async function processYoutubeVideo(
   });
 
   revalidatePath("/dashboard");
-  return { success: true };
+  return sent
+    ? { success: true }
+    : {
+        success: false,
+        error:
+          "The video was added, but the processing queue is unreachable. Use Retry on the job in a moment.",
+      };
 }
 
-export async function clearQueueItem(
-  fileId: string,
-): Promise<{ success: boolean; error?: string }> {
+export async function clearQueueItem(fileId: string): Promise<ActionResult> {
   const session = await auth();
-  if (!session?.user?.id) return { success: false, error: "Unauthorized" };
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      error: "Your session has expired. Please log in again.",
+    };
+  }
 
   try {
     const file = await db.uploadedFile.findUniqueOrThrow({

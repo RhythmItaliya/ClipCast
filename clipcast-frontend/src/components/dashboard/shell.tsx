@@ -1,0 +1,238 @@
+"use client";
+
+import {
+  Coins,
+  CreditCard,
+  HelpCircle,
+  LayoutDashboard,
+  ListChecks,
+  LogOut,
+  Scissors,
+  Settings,
+  Sparkles,
+} from "lucide-react";
+import { signOut } from "next-auth/react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
+import { LogoMark, Wordmark, YoutubeIcon } from "~/components/brand";
+
+const nav = [
+  {
+    title: "Overview",
+    to: "/dashboard",
+    icon: LayoutDashboard,
+    description: "Turn long-form podcasts into share-ready clips.",
+  },
+  {
+    title: "Clips",
+    to: "/dashboard/clips",
+    icon: Scissors,
+    description: "All clips grouped by source video.",
+  },
+  {
+    title: "Queue",
+    to: "/dashboard/queue",
+    icon: ListChecks,
+    description: "Processing jobs across your workspace.",
+  },
+  {
+    title: "YouTube",
+    to: "/dashboard/youtube",
+    icon: YoutubeIcon,
+    description: "Connect your channel to auto-pull and clip your videos.",
+  },
+  {
+    title: "Billing",
+    to: "/dashboard/billing",
+    icon: CreditCard,
+    description: "One-time credit packs. No subscription.",
+  },
+  {
+    title: "Settings",
+    to: "/dashboard/settings",
+    icon: Settings,
+    description: "Manage your profile and account.",
+  },
+] as const;
+
+export function DashboardShell({
+  children,
+  credits,
+  email,
+  name,
+}: {
+  children: ReactNode;
+  credits: number;
+  email: string;
+  name: string | null;
+}) {
+  const pathname = usePathname();
+  const current =
+    nav.find((n) => n.to === pathname) ??
+    nav.find((n) => n.to !== "/dashboard" && pathname.startsWith(n.to)) ??
+    nav[0];
+  const displayName = name ?? email.split("@")[0] ?? "Creator";
+  const creditPct = Math.max(0, Math.min(100, credits));
+
+  return (
+    <div className="bg-background text-foreground selection:bg-brand/30 h-screen overflow-hidden">
+      <div className="flex h-full">
+        {/* Sidebar */}
+        <aside className="border-border bg-sidebar hidden h-full w-64 shrink-0 flex-col border-r lg:flex">
+          <div className="border-border flex h-16 items-center gap-2.5 border-b px-6">
+            <LogoMark className="size-8 rounded-lg" />
+            <Wordmark />
+          </div>
+
+          <nav className="flex-1 space-y-1 p-3">
+            <div className="text-muted-foreground px-3 pt-3 pb-2 text-[10px] font-semibold tracking-widest uppercase">
+              Workspace
+            </div>
+            {nav.map((item) => {
+              const active = pathname === item.to;
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.to}
+                  href={item.to}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    active
+                      ? "bg-brand-soft text-brand"
+                      : "text-muted-foreground hover:bg-surface hover:text-foreground"
+                  }`}
+                >
+                  <Icon className="size-4" />
+                  <span>{item.title}</span>
+                  {active && (
+                    <span className="bg-brand ml-auto size-1.5 rounded-full" />
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+
+          {/* Credits card */}
+          <div className="border-border bg-surface m-3 rounded-2xl border p-4">
+            <div className="text-muted-foreground flex items-center gap-2 text-xs font-medium">
+              <Sparkles className="text-brand size-3.5" />
+              Credit balance
+            </div>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <span className="text-2xl font-semibold tracking-tight">
+                {credits}
+              </span>
+              <span className="text-muted-foreground text-xs">credits</span>
+            </div>
+            <div className="bg-surface-2 mt-3 h-1.5 overflow-hidden rounded-full">
+              <div
+                className="bg-brand h-full rounded-full"
+                style={{ width: `${creditPct}%` }}
+              />
+            </div>
+            <Link
+              href="/dashboard/billing"
+              className="bg-brand text-brand-foreground mt-4 flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-opacity hover:opacity-90"
+            >
+              <Coins className="size-3.5" /> Get more credits
+            </Link>
+          </div>
+
+          <div className="border-border border-t p-3">
+            <div className="flex items-center gap-3 rounded-lg p-2">
+              <div className="bg-brand-soft text-brand ring-brand/20 grid size-9 place-items-center rounded-full ring-1">
+                <span className="text-xs font-semibold uppercase">
+                  {displayName.charAt(0)}
+                </span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">
+                  {displayName}
+                </div>
+                <div className="text-muted-foreground truncate text-xs">
+                  {email}
+                </div>
+              </div>
+              <button
+                type="button"
+                title="Sign out"
+                onClick={() => signOut({ redirectTo: "/login" })}
+                className="text-muted-foreground hover:bg-surface hover:text-destructive grid size-8 place-items-center rounded-md"
+              >
+                <LogOut className="size-4" />
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        {/* Main */}
+        <div className="flex h-full min-w-0 flex-1 flex-col">
+          {/* Topbar */}
+          <header className="border-border bg-background/70 shrink-0 border-b backdrop-blur-xl">
+            <div className="flex h-16 items-center gap-4 px-6 lg:px-10">
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-lg font-semibold tracking-tight">
+                  {current.title}
+                </h1>
+                <p className="text-muted-foreground truncate text-xs">
+                  {current.description}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/dashboard/settings"
+                  className="border-border bg-surface text-muted-foreground hover:text-foreground grid size-9 place-items-center rounded-lg border"
+                  title="Settings"
+                >
+                  <HelpCircle className="size-4" />
+                </Link>
+                <button
+                  type="button"
+                  title="Sign out"
+                  onClick={() => signOut({ redirectTo: "/login" })}
+                  className="border-border bg-surface text-muted-foreground hover:text-destructive grid size-9 place-items-center rounded-lg border lg:hidden"
+                >
+                  <LogOut className="size-4" />
+                </button>
+                <Link
+                  href="/dashboard/billing"
+                  className="border-border bg-surface hidden items-center gap-2 rounded-lg border px-3 py-1.5 md:flex"
+                >
+                  <Coins className="text-brand size-3.5" />
+                  <span className="text-sm font-medium">{credits} credits</span>
+                </Link>
+              </div>
+            </div>
+          </header>
+
+          {/* Mobile nav pill */}
+          <div className="border-border bg-background shrink-0 border-b px-4 py-3 lg:hidden">
+            <nav className="flex gap-1 overflow-x-auto">
+              {nav.map((item) => {
+                const active = pathname === item.to;
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.to}
+                    href={item.to}
+                    className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium ${
+                      active
+                        ? "bg-brand-soft text-brand"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    <Icon className="size-4" /> {item.title}
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+
+          <main className="flex-1 overflow-y-auto px-6 py-6 lg:px-10 lg:py-8">
+            {children}
+          </main>
+        </div>
+      </div>
+    </div>
+  );
+}
