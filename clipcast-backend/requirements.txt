@@ -1,0 +1,7 @@
+# Dependencies for the local helper scripts in scripts/ (setup_modal_secret.py,
+# test_pipeline.py). NOT used to build the deployed Modal image — each app's
+# own image is built from apps/processor/requirements.txt and Modal's
+# .pip_install_from_requirements(...)/.run_commands([...]) calls in main.py.
+requests
+boto3
+python-dotenv

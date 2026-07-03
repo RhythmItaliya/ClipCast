@@ -52,7 +52,10 @@ Rules:
 - Clips must not overlap.
 - Start/end timestamps must match sentence boundaries in the transcript exactly.
 - Only use timestamps from the input — do not modify them.
-- Output only JSON: [{"start": seconds, "end": seconds}, ...]. Must be parseable by json.loads().
+- Include a short, punchy, clickable title for each clip (max 60 characters, no
+  surrounding quotes) in a "title" field — this is shown to viewers, so make it
+  a hook, not a description.
+- Output only JSON: [{"start": seconds, "end": seconds, "title": "..."}, ...]. Must be parseable by json.loads().
 - Target 40-60 second clips.
 - Density: Aim for approximately 1 high-quality clip for every 5 minutes of podcast duration (e.g., 4 clips for a 20-minute video).
 - Exclude: greetings, thank-yous, farewells.
@@ -71,7 +74,10 @@ Rules:
 - Clips must not overlap.
 - Start/end timestamps must match sentence boundaries in the transcript exactly.
 - Only use timestamps from the input — do not modify them.
-- Output only JSON: [{"start": seconds, "end": seconds}, ...]. Must be parseable by json.loads().
+- Include a short, punchy, clickable title for each clip (max 60 characters, no
+  surrounding quotes) in a "title" field — this is shown to viewers, so make it
+  a hook, not a description.
+- Output only JSON: [{"start": seconds, "end": seconds, "title": "..."}, ...]. Must be parseable by json.loads().
 - Target 40-60 second clips.
 - Exclude: greetings, abstractions without a concrete point, or filler conversation.
 - If no valid clips exist output [].
@@ -88,7 +94,10 @@ Rules:
 - Clips must not overlap.
 - Start/end timestamps must match sentence boundaries in the transcript exactly.
 - Only use timestamps from the input — do not modify them.
-- Output only JSON: [{"start": seconds, "end": seconds}, ...]. Must be parseable by json.loads().
+- Include a short, punchy, clickable title for each clip (max 60 characters, no
+  surrounding quotes) in a "title" field — this is shown to viewers, so make it
+  a hook, not a description.
+- Output only JSON: [{"start": seconds, "end": seconds, "title": "..."}, ...]. Must be parseable by json.loads().
 - Target 40-60 second clips.
 - Exclude: greetings, opinions without supporting reasoning, or vague statements.
 - If no valid clips exist output [].
@@ -105,7 +114,10 @@ Rules:
 - Clips must not overlap.
 - Start/end timestamps must match sentence boundaries in the transcript exactly.
 - Only use timestamps from the input — do not modify them.
-- Output only JSON: [{"start": seconds, "end": seconds}, ...]. Must be parseable by json.loads().
+- Include a short, punchy, clickable title for each clip (max 60 characters, no
+  surrounding quotes) in a "title" field — this is shown to viewers, so make it
+  a hook, not a description.
+- Output only JSON: [{"start": seconds, "end": seconds, "title": "..."}, ...]. Must be parseable by json.loads().
 - Target 40-60 second clips.
 - Exclude: greetings, slow warm-up conversation, or generic statements.
 - If no valid clips exist output [].
@@ -122,7 +134,10 @@ Rules:
 - Clips must not overlap.
 - Start/end timestamps must match sentence boundaries in the transcript exactly.
 - Only use timestamps from the input — do not modify them.
-- Output only JSON: [{"start": seconds, "end": seconds}, ...]. Must be parseable by json.loads().
+- Include a short, punchy, clickable title for each clip (max 60 characters, no
+  surrounding quotes) in a "title" field — this is shown to viewers, so make it
+  a hook, not a description.
+- Output only JSON: [{"start": seconds, "end": seconds, "title": "..."}, ...]. Must be parseable by json.loads().
 - Target 40-60 second clips.
 - Density: aim for roughly 1 high-quality clip per 5 minutes of podcast.
 - Exclude: greetings, thank-yous, farewells, and filler conversation.
@@ -286,6 +301,34 @@ def create_vertical_video(tracks, scores, pyframes_path, pyavi_path, audio_path,
     subprocess.run(ffmpeg_command, shell=True, check=True, text=True)
 
 
+def rgb_to_ass_bgr(r, g, b):
+    """RGB (0-255 each) -> an ASS override-tag color hex string (BGR order)."""
+    return f"{b:02X}{g:02X}{r:02X}"
+
+
+# ClipCast brand indigo (#6366F1) — the karaoke-highlight color for the
+# currently-spoken word in burned captions.
+HIGHLIGHT_COLOR_BGR = rgb_to_ass_bgr(99, 102, 241)
+
+# Subtle, semi-transparent corner wordmark — sized and faded like a real
+# Reels/TikTok creator watermark rather than a bold solid label. Shared by
+# the full-quality caption render and the fast preview path below.
+WATERMARK_DRAWTEXT = (
+    "drawtext=text='ClipCast':"
+    "fontfile=/usr/share/fonts/truetype/custom/Anton-Regular.ttf:"
+    "x=w-tw-36:y=36:fontsize=42:fontcolor=white@0.55:"
+    "shadowcolor=black@0.35:shadowx=1:shadowy=1"
+)
+
+
+def create_thumbnail(video_path, output_path, at_seconds):
+    """Grab a single frame as a JPEG preview thumbnail."""
+    subprocess.run(
+        f"ffmpeg -y -ss {max(0.0, at_seconds)} -i {video_path} -vframes 1 -q:v 3 {output_path}",
+        shell=True, check=True, capture_output=True,
+    )
+
+
 def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end, clip_video_path, output_path, max_words=5):
     temp_dir = os.path.dirname(output_path)
     subtitle_path = os.path.join(temp_dir, "temp_subtitles.ass")
@@ -294,9 +337,11 @@ def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end, clip
                      if s.get("start") is not None and s.get("end") is not None
                      and s.get("end") > clip_start and s.get("start") < clip_end]
 
-    subtitles = []
-    current_words = []
-    current_start = current_end = None
+    # Each chunk is a list of (word, start_rel, end_rel) — kept per-word
+    # (not joined into one string) so every word can get its own karaoke-timed
+    # highlight event below.
+    chunks = []
+    current_chunk = []
 
     for segment in clip_segments:
         word = segment.get("word", "").strip()
@@ -308,21 +353,13 @@ def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end, clip
         end_rel = max(0.0, seg_end - clip_start)
         if end_rel <= 0:
             continue
-        if not current_words:
-            current_start = start_rel
-            current_end = end_rel
-            current_words = [word]
-        elif len(current_words) >= max_words:
-            subtitles.append((current_start, current_end, ' '.join(current_words)))
-            current_words = [word]
-            current_start = start_rel
-            current_end = end_rel
-        else:
-            current_words.append(word)
-            current_end = end_rel
+        if len(current_chunk) >= max_words:
+            chunks.append(current_chunk)
+            current_chunk = []
+        current_chunk.append((word, start_rel, end_rel))
 
-    if current_words:
-        subtitles.append((current_start, current_end, ' '.join(current_words)))
+    if current_chunk:
+        chunks.append(current_chunk)
 
     subs = pysubs2.SSAFile()
     subs.info["WrapStyle"] = 0
@@ -336,9 +373,11 @@ def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end, clip
     new_style.fontname = "Anton"
     new_style.fontsize = 140
     new_style.primarycolor = pysubs2.Color(255, 255, 255)
-    new_style.outline = 2.0
-    new_style.shadow = 2.0
-    new_style.shadowcolor = pysubs2.Color(0, 0, 0, 128)
+    new_style.outline = 3.0
+    # No drop shadow — a heavy black shadow/box reads as amateur. The
+    # thicker outline above keeps text readable over busy footage without it.
+    new_style.shadow = 0.0
+    new_style.shadowcolor = pysubs2.Color(0, 0, 0, 0)
     new_style.alignment = 2
     new_style.marginl = 50
     new_style.marginr = 50
@@ -346,35 +385,44 @@ def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end, clip
     new_style.spacing = 0.0
     subs.styles[style_name] = new_style
 
-    for start, end, text in subtitles:
-        subs.events.append(pysubs2.SSAEvent(
-            start=pysubs2.make_time(s=start),
-            end=pysubs2.make_time(s=end),
-            text=text, style=style_name
-        ))
+    # Karaoke-style highlight: one event per WORD (not per chunk), spanning
+    # exactly that word's spoken duration, with the active word colored
+    # (ClipCast brand indigo) and the rest of the chunk left white.
+    for chunk in chunks:
+        words = [w for w, _, _ in chunk]
+        for i, (word, start_rel, end_rel) in enumerate(chunk):
+            styled_words = [
+                f"{{\\c&H{HIGHLIGHT_COLOR_BGR}&}}{w}{{\\c&HFFFFFF&}}" if j == i else w
+                for j, w in enumerate(words)
+            ]
+            subs.events.append(pysubs2.SSAEvent(
+                start=pysubs2.make_time(s=start_rel),
+                end=pysubs2.make_time(s=end_rel),
+                text=' '.join(styled_words), style=style_name,
+            ))
 
     subs.save(subtitle_path)
 
     ffmpeg_cmd = (
         f"ffmpeg -y -i {clip_video_path} "
-        f"-vf \"ass={subtitle_path},drawtext=text='ClipCast':"
-        f"fontfile=/usr/share/fonts/truetype/custom/Anton-Regular.ttf:"
-        f"x=w-tw-40:y=40:fontsize=60:fontcolor=white:shadowcolor=black:shadowx=3:shadowy=3\" "
+        f"-vf \"ass={subtitle_path},{WATERMARK_DRAWTEXT}\" "
         f"-c:v h264_nvenc -preset p6 -cq 18 -b:v 0 "
         f"-c:a copy -movflags +faststart {output_path}"
     )
     subprocess.run(ffmpeg_cmd, shell=True, check=True)
 
 
-def create_preview_clip(base_dir, original_video_path, s3_key, start_time, end_time, clip_index):
+def create_preview_clip(base_dir, original_video_path, s3_key, start_time, end_time, clip_index, title=""):
     clip_name = f"preview_{clip_index}"
     s3_key_dir = os.path.dirname(s3_key)
     output_s3_key = f"{s3_key_dir}/{clip_name}.mp4"
+    thumbnail_s3_key = f"{s3_key_dir}/{clip_name}_thumb.jpg"
     print(f"Preview output S3 key: {output_s3_key}")
 
     clip_dir = base_dir / clip_name
     clip_dir.mkdir(parents=True, exist_ok=True)
     output_path = clip_dir / "preview.mp4"
+    thumbnail_path = clip_dir / "thumb.jpg"
     duration = end_time - start_time
 
     probe_cmd = (
@@ -395,22 +443,32 @@ def create_preview_clip(base_dir, original_video_path, s3_key, start_time, end_t
     ffmpeg_cmd = (
         f"ffmpeg -y -ss {start_time} -t {duration} -i {original_video_path} "
         f'-vf "crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale=480:854,'
-        f'drawtext=text=\'PREVIEW\':fontsize=24:fontcolor=white@0.6:x=(w-tw)/2:y=20,'
-        f'drawtext=text=\'ClipCast\':fontsize=32:fontcolor=white:x=w-tw-20:y=20" '
+        f"drawtext=text='PREVIEW':fontsize=24:fontcolor=white@0.6:x=(w-tw)/2:y=20,"
+        f'{WATERMARK_DRAWTEXT}" '
         f"-c:v h264 -preset ultrafast -crf 30 -c:a aac -b:a 96k {output_path}"
     )
     subprocess.run(ffmpeg_cmd, shell=True, check=True, capture_output=True)
+    create_thumbnail(output_path, thumbnail_path, at_seconds=min(1.0, duration * 0.15))
 
     s3_client = boto3.client("s3")
     s3_client.upload_file(str(output_path), os.environ["S3_BUCKET_NAME"], output_s3_key)
+    s3_client.upload_file(str(thumbnail_path), os.environ["S3_BUCKET_NAME"], thumbnail_s3_key)
     print(f"Preview clip uploaded: {output_s3_key}")
     shutil.rmtree(clip_dir, ignore_errors=True)
 
+    return {
+        "s3_key": output_s3_key,
+        "thumbnail_s3_key": thumbnail_s3_key,
+        "title": title,
+        "duration": round(duration),
+    }
 
-def process_clip(base_dir, original_video_path, s3_key, start_time, end_time, clip_index, transcript_segments):
+
+def process_clip(base_dir, original_video_path, s3_key, start_time, end_time, clip_index, transcript_segments, title=""):
     clip_name = f"clip_{clip_index}"
     s3_key_dir = os.path.dirname(s3_key)
     output_s3_key = f"{s3_key_dir}/{clip_name}.mp4"
+    thumbnail_s3_key = f"{s3_key_dir}/{clip_name}_thumb.jpg"
     print(f"Output S3 key: {output_s3_key}")
 
     clip_dir = base_dir / clip_name
@@ -466,9 +524,21 @@ def process_clip(base_dir, original_video_path, s3_key, start_time, end_time, cl
 
     create_subtitles_with_ffmpeg(transcript_segments, start_time, end_time, vertical_mp4_path, subtitle_output_path, max_words=5)
 
-    boto3.client("s3").upload_file(str(subtitle_output_path), os.environ["S3_BUCKET_NAME"], output_s3_key)
+    thumbnail_path = clip_dir / "thumb.jpg"
+    create_thumbnail(subtitle_output_path, thumbnail_path, at_seconds=min(1.0, duration * 0.15))
+
+    s3_client = boto3.client("s3")
+    s3_client.upload_file(str(subtitle_output_path), os.environ["S3_BUCKET_NAME"], output_s3_key)
+    s3_client.upload_file(str(thumbnail_path), os.environ["S3_BUCKET_NAME"], thumbnail_s3_key)
     shutil.rmtree(clip_dir, ignore_errors=True)
     (base_dir / f"{clip_name}.mp4").unlink(missing_ok=True)
+
+    return {
+        "s3_key": output_s3_key,
+        "thumbnail_s3_key": thumbnail_s3_key,
+        "title": title,
+        "duration": round(duration),
+    }
 
 
 @app.cls(
@@ -777,27 +847,30 @@ class ClipCast:
                 continue
             if duration > 0 and end > duration + 1:
                 continue
-            valid_moments.append({"start": start, "end": end})
+            title = str(moment.get("title", "") or "").strip()[:80]
+            valid_moments.append({"start": start, "end": end, "title": title})
             if len(valid_moments) == 12:
                 break
 
         # ── Render clips ─────────────────────────────────────────────────────
         clips_rendered = 0
+        clip_records = []
         clip_errors = []
         for index, moment in enumerate(valid_moments):
             print(f"Processing clip {index} ({'PREVIEW' if request.preview_only else 'FULL'}) "
                   f"from {moment['start']} to {moment['end']}")
             try:
                 if request.preview_only:
-                    create_preview_clip(
+                    record = create_preview_clip(
                         base_dir, video_path, request.s3_key,
-                        moment["start"], moment["end"], index
+                        moment["start"], moment["end"], index, moment["title"]
                     )
                 else:
-                    process_clip(
+                    record = process_clip(
                         base_dir, video_path, request.s3_key,
-                        moment["start"], moment["end"], index, transcript_segments
+                        moment["start"], moment["end"], index, transcript_segments, moment["title"]
                     )
+                clip_records.append(record)
                 clips_rendered += 1
             except subprocess.CalledProcessError as ffmpeg_err:
                 msg = (
@@ -823,6 +896,7 @@ class ClipCast:
             "duration": duration,
             "clips_found": len(valid_moments),
             "clips_rendered": clips_rendered,
+            "clips": clip_records,
             **({"clip_warnings": clip_errors} if clip_errors else {}),
         }
 
