@@ -1,4 +1,4 @@
-# 08 — Admin panel
+# ClipCast — 08 — Admin panel
 
 Everything lives under `src/app/admin/`, guarded by
 `src/app/admin/layout.tsx` (see [03-authentication-and-roles.md](03-authentication-and-roles.md)

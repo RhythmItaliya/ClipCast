@@ -1,4 +1,4 @@
-# 07 — Billing & credits
+# ClipCast — 07 — Billing & credits
 
 ## The credit model
 

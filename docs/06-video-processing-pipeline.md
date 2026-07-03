@@ -1,4 +1,4 @@
-# 06 — Video processing pipeline (Modal)
+# ClipCast — 06 — Video processing pipeline (Modal)
 
 Two independently deployed Modal apps. Full detail lives next to the code —
 this page is the map between them.
@@ -93,8 +93,11 @@ class ClipCast:
         return json.dumps(segments)
 ```
 
-**Step 4 — moment selection.** One prompt per clip mode (write your own
-rules per mode — this is the actual `qa` prompt, trimmed):
+**Step 4 — moment selection, plus an AI title.** One prompt per clip mode
+(write your own rules per mode — this is the actual `qa` prompt, trimmed).
+The prompt asks Gemini for a `title` alongside each `{start, end}` — free,
+since it's the same call that already picks the moments, no second API call
+needed:
 
 ```python
 CLIP_MODE_PROMPTS = {
@@ -102,7 +105,10 @@ CLIP_MODE_PROMPTS = {
 Each clip must start with the question and end with the answer.
 Rules:
 - Start/end timestamps must match sentence boundaries in the transcript exactly.
-- Output only JSON: [{"start": seconds, "end": seconds}, ...].
+- Include a short, punchy, clickable title for each clip (max 60 characters,
+  no surrounding quotes) in a "title" field — this is shown to viewers, so
+  make it a hook, not a description.
+- Output only JSON: [{"start": seconds, "end": seconds, "title": "..."}, ...].
 - Target 40-60 second clips. ~1 clip per 5 minutes of source.
 - If no valid clips exist output [].
 """,
@@ -120,7 +126,10 @@ Rules:
 
 **Step 5 — the public endpoint** ties it together — download from S3,
 transcribe, pick moments, render each one (fast preview crop or full
-ASD-tracked render + burned captions), upload clips, return:
+ASD-tracked render + burned captions + thumbnail), upload clips, and return a
+**structured per-clip list** (not just aggregate counts — this is what the
+frontend uses to create `Clip` rows directly, instead of guessing at rendered
+filenames by listing the S3 bucket):
 
 ```python
     @modal.fastapi_endpoint(method="POST")
@@ -136,20 +145,90 @@ ASD-tracked render + burned captions), upload clips, return:
         transcript_json = self.transcribe_video.local(base_dir, video_path)
         moments = json.loads(self.identify_moments.local(transcript_json, request.clip_mode))
 
-        clip_keys = []
+        clip_records = []
         for i, m in enumerate(moments):
             if request.preview_only:
-                clip_keys.append(create_preview_clip(base_dir, video_path, request.s3_key, m["start"], m["end"], i))
+                record = create_preview_clip(base_dir, video_path, request.s3_key, m["start"], m["end"], i, m["title"])
             else:
-                clip_keys.append(process_clip(base_dir, video_path, request.s3_key, m["start"], m["end"], i, transcript_json))
-        return {"clips": clip_keys}
+                record = process_clip(base_dir, video_path, request.s3_key, m["start"], m["end"], i, transcript_json, m["title"])
+            clip_records.append(record)  # {s3_key, thumbnail_s3_key, title, duration}
+        return {"success": True, "duration": duration, "clips": clip_records}
 ```
 
 `process_clip()` is where TalkNet active-speaker detection
 (`asd/demoTalkNet.py`), `create_vertical_video()` (9:16 crop following the
-speaker), and `create_subtitles_with_ffmpeg()` (burned captions) get chained
-together — see [`clipcast-backend/apps/processor/README.md`](../clipcast-backend/apps/processor/README.md)
-for that internal chain in more detail.
+speaker), `create_subtitles_with_ffmpeg()` (burned karaoke captions + subtle
+watermark — see below), and `create_thumbnail()` get chained together — see
+[`clipcast-backend/apps/processor/README.md`](../clipcast-backend/apps/processor/README.md)
+for that internal chain in more detail. Each render function returns
+`{"s3_key": ..., "thumbnail_s3_key": ..., "title": ..., "duration": ...}`,
+which is exactly the shape the frontend's `create-clips-in-db` step maps
+straight into `db.clip.createMany()` (see
+[05-uploads-and-queue.md](05-uploads-and-queue.md)).
+
+## Captions: karaoke word-highlight, no black box
+
+`create_subtitles_with_ffmpeg()` builds one ASS subtitle event **per word**
+(not per multi-word chunk) — each event spans exactly that word's spoken
+duration, with the chunk's text rendered plain white except the
+currently-active word, which is wrapped in a color override tag:
+
+```python
+def rgb_to_ass_bgr(r, g, b):
+    return f"{b:02X}{g:02X}{r:02X}"   # ASS colors are BGR, not RGB
+
+HIGHLIGHT_COLOR_BGR = rgb_to_ass_bgr(99, 102, 241)  # ClipCast brand indigo (#6366F1)
+
+for chunk in chunks:               # chunk = list of (word, start_rel, end_rel)
+    words = [w for w, _, _ in chunk]
+    for i, (word, start_rel, end_rel) in enumerate(chunk):
+        styled = [f"{{\\c&H{HIGHLIGHT_COLOR_BGR}&}}{w}{{\\c&HFFFFFF&}}" if j == i else w
+                  for j, w in enumerate(words)]
+        subs.events.append(pysubs2.SSAEvent(
+            start=pysubs2.make_time(s=start_rel), end=pysubs2.make_time(s=end_rel),
+            text=' '.join(styled), style="Default"))
+```
+
+The style itself has **no drop shadow** (`shadow = 0.0`) — a heavy black
+shadow/box behind captions reads as amateur. A thicker outline
+(`outline = 3.0`, black) replaces it for readability over busy footage
+without the black cast.
+
+## Watermark: subtle, semi-transparent, not a bold label
+
+The same `WATERMARK_DRAWTEXT` constant is shared by the full-quality caption
+render and the fast preview path:
+
+```python
+WATERMARK_DRAWTEXT = (
+    "drawtext=text='ClipCast':fontfile=/usr/share/fonts/truetype/custom/Anton-Regular.ttf:"
+    "x=w-tw-36:y=36:fontsize=42:fontcolor=white@0.55:"
+    "shadowcolor=black@0.35:shadowx=1:shadowy=1"
+)
+```
+
+Small, ~55% opacity, thin shadow — sized like a real Reels/TikTok creator
+watermark rather than a solid, attention-grabbing label. There's no separate
+logo image asset (none exists in the repo); this is a deliberate,
+maintenance-free choice — one ffmpeg `drawtext` filter, no binary asset to
+keep in sync with the brand.
+
+## Thumbnails
+
+`create_thumbnail()` grabs a single frame via ffmpeg (`-vframes 1`) from the
+**final** rendered output (after captions/watermark, so the preview matches
+what viewers will actually see) at roughly 15% into the clip — early enough to
+be representative, late enough to avoid a black/blank opening frame:
+
+```python
+def create_thumbnail(video_path, output_path, at_seconds):
+    subprocess.run(f"ffmpeg -y -ss {max(0.0, at_seconds)} -i {video_path} -vframes 1 -q:v 3 {output_path}",
+                    shell=True, check=True, capture_output=True)
+```
+
+Uploaded to S3 as `{clip_name}_thumb.jpg` next to the clip itself. The
+frontend batch-presigns these (`getClipThumbnailUrls()` in
+`src/actions/clips.ts`) rather than making the bucket public.
 
 **Step 6 — the downloader**, in short (full detail + gotchas in
 [`clipcast-backend/apps/downloader/README.md`](../clipcast-backend/apps/downloader/README.md)):

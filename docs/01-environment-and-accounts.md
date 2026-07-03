@@ -1,4 +1,4 @@
-# 01 — Environment & accounts
+# ClipCast — 01 — Environment & accounts
 
 Before running anything, you need accounts with 7 external services. Everything
 is configured through **one file at the repo root**: `.env`.

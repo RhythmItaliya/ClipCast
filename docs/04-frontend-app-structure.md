@@ -1,4 +1,4 @@
-# 04 — Frontend app structure
+# ClipCast — 04 — Frontend app structure
 
 ## Route groups
 

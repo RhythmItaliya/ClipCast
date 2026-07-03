@@ -1,4 +1,4 @@
-# 03 — Authentication & roles
+# ClipCast — 03 — Authentication & roles
 
 `clipcast-frontend/src/server/auth/config.ts` (config) +
 `src/server/auth/index.ts` (exports `auth()`, wired into

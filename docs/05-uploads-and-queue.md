@@ -1,4 +1,4 @@
-# 05 — Uploads & the processing queue
+# ClipCast — 05 — Uploads & the processing queue
 
 Two ways to submit a job, one queue that handles both.
 
@@ -201,13 +201,22 @@ export const processVideoFn = inngest.createFunction(
       body: JSON.stringify({ s3_key: s3Key, clip_mode: clipMode, preview_only: previewOnly }),
     });
 
+    const modalData = await modalResponse.json(); // { duration, clips: [{ s3_key, thumbnail_s3_key, title, duration }, ...] }
+
     await step.run("create-clips-in-db", async () => {
-      for (const clipKey of modalResponse.body.clips) {
-        await db.clip.create({ data: { s3Key: clipKey, clipMode, userId, uploadedFileId } });
+      const clips = modalData.clips ?? [];
+      if (clips.length > 0) {
+        await db.clip.createMany({
+          data: clips.map((c) => ({
+            s3Key: c.s3_key, thumbnailS3Key: c.thumbnail_s3_key ?? null,
+            title: c.title || null, duration: c.duration ?? null,
+            clipMode, userId, uploadedFileId, isPreview: previewOnly,
+          })),
+        });
       }
     });
     await step.run("deduct-credits", async () => {
-      const minutes = Math.max(1, Math.ceil(modalResponse.body.durationSeconds / 60));
+      const minutes = Math.max(1, Math.ceil(modalData.duration / 60));
       await db.user.update({ where: { id: userId }, data: { credits: { decrement: minutes } } });
     });
     await step.run("set-status-processed", async () =>
