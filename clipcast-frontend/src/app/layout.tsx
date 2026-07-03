@@ -2,8 +2,15 @@ import "~/styles/globals.css";
 
 import { type Metadata } from "next";
 import { DM_Sans, Space_Grotesk } from "next/font/google";
-import { Toaster } from "sonner";
+import dynamic from "next/dynamic";
 import { NetworkStatus } from "~/components/network-status";
+
+// Dynamic import prevents the Toaster (which calls useContext) from running
+// during static prerender of the /_global-error boundary.
+const Toaster = dynamic(
+  () => import("sonner").then((m) => m.Toaster),
+  { ssr: false },
+);
 
 export const metadata: Metadata = {
   title: "ClipCast — AI Podcast Clipper",
