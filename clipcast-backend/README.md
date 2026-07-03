@@ -17,7 +17,8 @@ clipcast-backend/
 │       ├── main.py
 │       └── deploy.sh
 ├── scripts/
-│   └── setup_modal_secret.py
+│   ├── setup_modal_secret.py  push .env values into Modal secret
+│   └── test_pipeline.py       end-to-end pipeline test
 └── deploy.sh                  deploy one service or both
 ```
 
@@ -61,3 +62,111 @@ recommended for YouTube.
 2. `clipcast` downloads the S3 object inside Modal, transcribes and renders on
    an L40S GPU, uploads the clips to S3, and removes temporary container files.
 3. The user's computer only runs the frontend and local event orchestration.
+
+---
+
+## End-to-end pipeline test
+
+`scripts/test_pipeline.py` runs the full pipeline against your live Modal
+endpoints: YouTube URL → CPU downloader → S3 → GPU processor → S3 clips.
+
+### Prerequisites
+
+```bash
+# Activate a Python virtualenv that has the dependencies:
+source clipcast-backend/venv/bin/activate     # or .venv/bin/activate
+pip install requests boto3 python-dotenv      # if not already installed
+```
+
+The script reads credentials from the repo root `.env` automatically.
+All required environment variables must be set:
+
+| Variable | What it is |
+|---|---|
+| `PROCESS_VIDEO_ENDPOINT` | Modal GPU processor URL |
+| `DOWNLOAD_VIDEO_ENDPOINT` | Modal CPU downloader URL |
+| `PROCESS_VIDEO_ENDPOINT_AUTH` | Shared bearer token |
+| `S3_BUCKET_NAME` | S3 bucket name |
+| `AWS_REGION` | S3 region (e.g. `us-east-1`) |
+| `AWS_ACCESS_KEY_ID` | AWS access key |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key |
+
+### Quick test (default short video, ~3 min)
+
+```bash
+# From repo root — fastest: preview mode skips ASD + subtitles (~5-10 min total)
+python clipcast-backend/scripts/test_pipeline.py --preview
+
+# Full quality clips (takes 15-25 min with cold GPU start)
+python clipcast-backend/scripts/test_pipeline.py
+```
+
+### Custom video
+
+```bash
+python clipcast-backend/scripts/test_pipeline.py \
+  --url "https://www.youtube.com/watch?v=<short_video_id>" \
+  --mode highlights \
+  --preview
+```
+
+### Skip download (already in S3)
+
+```bash
+python clipcast-backend/scripts/test_pipeline.py \
+  --s3-key "test-e2e/abc123/original.mp4" \
+  --mode qa
+```
+
+### All options
+
+```
+--url URL           YouTube URL (default: TED-Ed ~3 min short)
+--s3-key KEY        Skip download; use existing S3 key for processing
+--mode MODE         Clip mode: qa | motivational | educational | highlights | all
+--preview           Fast preview clips only (no ASD, no subtitles, 480p)
+--skip-process      Only test the download step, skip GPU processing
+--no-presign        Do not generate presigned S3 URLs for clip preview
+```
+
+### What the test verifies
+
+1. All required env vars are present and non-empty
+2. Download endpoint accepts the YouTube URL and returns a `call_id`
+3. Download worker completes and the video lands in S3
+4. GPU processor transcribes, identifies moments, and renders clips
+5. The rendered clips appear in S3 under the expected prefix
+6. Presigned 1-hour URLs are printed so you can preview them in a browser
+
+### Recommended short test videos (≤ 5 min, low bot-block risk)
+
+| URL | Duration | Description |
+|---|---|---|
+| `https://www.youtube.com/watch?v=arj7oStGLkU` | 3:19 | TED-Ed — educational (default) |
+| `https://www.youtube.com/watch?v=H14bBuluwB8` | 2:48 | Short motivational talk |
+| `https://www.youtube.com/watch?v=JC82Il2cjqA` | 4:05 | Short podcast-style clip |
+
+### Troubleshooting
+
+**Download fails with "all proxies blocked"**
+
+The free proxy list needs to be seeded. Run once after first deploy:
+```bash
+modal run clipcast-backend/apps/downloader/main.py::refresh_proxies
+```
+Or set `YT_DLP_PROXY` to a residential proxy URL in `.env` and redeploy.
+
+**Processing times out**
+
+- Use `--preview` for a much faster test run (skips ASD + subtitle burn-in)
+- A GPU cold-start can take 5 minutes; warm containers finish in 2-5 min
+
+**"S3 key not found" error in processor**
+
+The download step must complete before processing starts. Check the S3 key
+printed by the download step exists in your bucket.
+
+**"Gemini API error"**
+
+Re-run `setup_modal_secret.py` to push the latest `GEMINI_API_KEY`, then
+redeploy the processor.
