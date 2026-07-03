@@ -160,6 +160,13 @@ model Clip {
     isPreview Boolean @default(false)
     clipMode  String  @default("qa")
 
+    // AI-generated title (Gemini, alongside moment selection) + a rendered
+    // preview frame + duration in seconds — null for clips rendered before
+    // this feature existed (UI falls back to a filename-derived title/no thumb).
+    title          String?
+    thumbnailS3Key String?
+    duration       Int?
+
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
