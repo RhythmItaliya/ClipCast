@@ -33,6 +33,17 @@ export async function POST(req: Request) {
 
       const userId = session.client_reference_id;
 
+      // Stripe retries this webhook on timeout/non-2xx; without this guard a
+      // retry would double-credit the user before failing on the unique
+      // stripeSessionId constraint below.
+      const alreadyProcessed = await db.purchase.findUnique({
+        where: { stripeSessionId: session.id },
+        select: { id: true },
+      });
+      if (alreadyProcessed) {
+        return new NextResponse(null, { status: 200 });
+      }
+
       const retreivedSession = await stripe.checkout.sessions.retrieve(
         session.id,
         { expand: ["line_items"] },
@@ -44,28 +55,52 @@ export async function POST(req: Request) {
 
         if (priceId) {
           let creditsToAdd = 0;
+          let pack = "";
 
           if (priceId === env.STRIPE_SMALL_CREDIT_PACK) {
             creditsToAdd = 50;
+            pack = "small";
           } else if (priceId === env.STRIPE_MEDIUM_CREDIT_PACK) {
             creditsToAdd = 150;
+            pack = "medium";
           } else if (priceId === env.STRIPE_LARGE_CREDIT_PACK) {
             creditsToAdd = 500;
+            pack = "large";
           }
 
-          if (userId) {
+          // Resolve the target user once so we can both increment credits and
+          // write a matching Purchase ledger row against the same id.
+          let resolvedUserId = userId ?? null;
+          if (resolvedUserId) {
             await db.user.update({
-              where: { id: userId },
+              where: { id: resolvedUserId },
               data: {
                 credits: { increment: creditsToAdd },
                 stripeCustomerId: customerId,
               },
             });
           } else {
-            await db.user.update({
+            const updated = await db.user.update({
               where: { stripeCustomerId: customerId },
               data: {
                 credits: { increment: creditsToAdd },
+              },
+              select: { id: true },
+            });
+            resolvedUserId = updated.id;
+          }
+
+          if (pack && resolvedUserId) {
+            await db.purchase.create({
+              data: {
+                userId: resolvedUserId,
+                stripeSessionId: session.id,
+                stripeCustomerId: customerId,
+                priceId,
+                pack,
+                credits: creditsToAdd,
+                amountTotal: session.amount_total ?? 0,
+                currency: session.currency ?? "usd",
               },
             });
           }
