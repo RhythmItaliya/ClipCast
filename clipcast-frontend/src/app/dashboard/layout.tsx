@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { ForceLogout } from "~/components/force-logout";
-import NavHeader from "~/components/nav-header";
+import { DashboardShell } from "~/components/dashboard/shell";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 
@@ -18,7 +18,7 @@ export default async function DashboardLayout({
 
   const user = await db.user.findUnique({
     where: { id: session.user.id },
-    select: { credits: true, email: true },
+    select: { credits: true, email: true, name: true },
   });
 
   if (!user) {
@@ -26,9 +26,8 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <NavHeader credits={user.credits} email={user.email} />
-      <main className="container mx-auto flex-1 py-6">{children}</main>
-    </div>
+    <DashboardShell credits={user.credits} email={user.email} name={user.name}>
+      {children}
+    </DashboardShell>
   );
 }

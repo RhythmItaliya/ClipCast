@@ -1,26 +1,34 @@
 import "~/styles/globals.css";
 
 import { type Metadata } from "next";
-import { Geist } from "next/font/google";
+import { DM_Sans, Space_Grotesk } from "next/font/google";
 import { Toaster } from "sonner";
+import { NetworkStatus } from "~/components/network-status";
 
 export const metadata: Metadata = {
-  title: "Podcast Clipper",
-  description: "Podcast Clipper",
+  title: "ClipCast — AI Podcast Clipper",
+  description:
+    "Turn long podcasts into viral short-form clips with AI. Upload a video or paste a YouTube link.",
   icons: [{ rel: "icon", url: "/favicon.ico" }],
 };
 
-const geist = Geist({
+const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
-  variable: "--font-geist-sans",
+  variable: "--font-space-grotesk",
+});
+
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  variable: "--font-dm-sans",
 });
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${geist.variable}`}>
+    <html lang="en" className={`${spaceGrotesk.variable} ${dmSans.variable}`}>
       <body>
+        <NetworkStatus />
         {children}
         <Toaster richColors position="top-right" />
       </body>
