@@ -47,6 +47,20 @@ cloud, even in development).
 | Background job dashboard (Inngest) | http://localhost:8288 |
 | Video processing backend | runs on Modal's cloud, not on your machine |
 
+## Test accounts
+
+The database was reset to exactly these two accounts, ready for hands-on
+testing (sign in at `/login`):
+
+| Role | Email | Password |
+|---|---|---|
+| Admin (`/admin`) | `admin@clipcast.dev` | `ClipCast2026!` |
+| Regular user | `user@clipcast.dev` | `ClipCast2026!` |
+
+Both start with credits already loaded (100 for the admin, 10 for the user)
+so you can submit a job right away. The S3 bucket was also emptied, so the
+first upload/clip you generate will be the only thing in it.
+
 ## Learn how it all works
 
 Never seen this codebase before? [docs/](docs/) is a staged, numbered
@@ -55,4 +69,6 @@ at [docs/00-overview.md](docs/00-overview.md).
 
 Prefer pictures? [docs/excalidraw/](docs/excalidraw/) has one diagram per
 major flow — the overall system design, the processing pipeline, credits and
-billing, video processing, and YouTube ingestion.
+billing, video processing, and YouTube ingestion. [docs/diagrams/](docs/diagrams/)
+has the formal diagram set — use case, system architecture, flowchart,
+activity, sequence, class, ER, and data flow (Level 0 + Level 1).
