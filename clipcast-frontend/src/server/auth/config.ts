@@ -5,45 +5,34 @@ import DiscordProvider from "next-auth/providers/discord";
 import GoogleProvider from "next-auth/providers/google";
 import { env } from "~/env";
 import { comparePasswords } from "~/lib/auth";
-
 import { db } from "~/server/db";
 
-/**
- * Module augmentation for `next-auth` types. Allows us to add custom properties to the `session`
- * object and keep type safety.
- *
- * @see https://next-auth.js.org/getting-started/typescript#module-augmentation
- */
+// ── Type augmentation — adds `id` and `role` to the session user object ──────
 declare module "next-auth" {
   interface Session extends DefaultSession {
     user: {
       id: string;
-      // ...other properties
-      // role: UserRole;
+      role: "USER" | "ADMIN";
     } & DefaultSession["user"];
   }
-
-  // interface User {
-  //   // ...other properties
-  //   // role: UserRole;
-  // }
 }
 
-/**
- * Options for NextAuth.js used to configure adapters, providers, callbacks, etc.
- *
- * @see https://next-auth.js.org/configuration/options
- */
+declare module "@auth/core/jwt" {
+  interface JWT {
+    id?: string;
+    role?: "USER" | "ADMIN";
+  }
+}
+
 export const authConfig = {
-  // Required for production (`next start`) on self-hosted/localhost — Auth.js
-  // only auto-trusts the host in dev mode.
+  // Required for production (`next start`) on self-hosted/localhost.
   trustHost: true,
   pages: {
     signIn: "/login",
   },
   providers: [
-    // Google OAuth is only offered when credentials are configured, so a
-    // missing GOOGLE_CLIENT_ID never crashes the whole auth setup.
+    // Google OAuth is only registered when credentials are present so a
+    // missing GOOGLE_CLIENT_ID never crashes the auth setup.
     ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
       ? [
           GoogleProvider({
@@ -65,26 +54,21 @@ export const authConfig = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          return null;
-        }
-
-        const email = credentials.email as string;
-        const password = credentials.password as string;
+        if (!credentials?.email || !credentials?.password) return null;
 
         const user = await db.user.findUnique({
-          where: { email },
+          where: { email: credentials.email as string },
         });
+        if (!user) return null;
 
-        if (!user) {
-          return null;
-        }
-
-        const passwordMatch = await comparePasswords(
-          password,
-          user.password || "",
+        const ok = await comparePasswords(
+          credentials.password as string,
+          user.password ?? "",
         );
-        if (!passwordMatch) return null;
+        if (!ok) return null;
+
+        // Banned users cannot sign in at all.
+        if (user.banned) return null;
 
         return user;
       },
@@ -93,18 +77,29 @@ export const authConfig = {
   session: { strategy: "jwt" },
   adapter: PrismaAdapter(db),
   callbacks: {
-    session: ({ session, token }) => ({
-      ...session,
-      user: {
-        ...session.user,
-        id: token.sub,
-      },
-    }),
-    jwt: ({ token, user }) => {
+    // Persist role + id from the DB into the JWT on every sign-in.
+    async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
+        // Pull the role from the DB so it's always fresh on sign-in.
+        const dbUser = await db.user.findUnique({
+          where: { id: user.id },
+          select: { role: true },
+        });
+        token.role = dbUser?.role ?? "USER";
       }
       return token;
+    },
+    // Expose id + role to every `useSession` / `auth()` call.
+    session({ session, token }) {
+      return {
+        ...session,
+        user: {
+          ...session.user,
+          id: token.sub ?? token.id ?? "",
+          role: token.role ?? "USER",
+        },
+      };
     },
   },
 } satisfies NextAuthConfig;

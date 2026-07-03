@@ -15,11 +15,11 @@ const SCOPES = [
 
 export async function getYouTubeAuthUrl(): Promise<string> {
   const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
+  if (!session?.user?.id) throw new Error("Your session has expired. Please log in again.");
 
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
     throw new Error(
-      "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in .env to use YouTube channel connect.",
+      "YouTube channel integration is not configured yet. Please contact support.",
     );
   }
 
@@ -38,7 +38,7 @@ export async function getYouTubeAuthUrl(): Promise<string> {
 
 export async function disconnectYouTubeChannel(): Promise<void> {
   const session = await auth();
-  if (!session?.user?.id) throw new Error("Unauthorized");
+  if (!session?.user?.id) throw new Error("Your session has expired. Please log in again.");
 
   await db.user.update({
     where: { id: session.user.id },
@@ -67,7 +67,7 @@ async function refreshAccessToken(userId: string, refreshToken: string) {
     }),
   });
 
-  if (!res.ok) throw new Error("Failed to refresh YouTube token");
+  if (!res.ok) throw new Error("Your YouTube connection has expired. Please disconnect and reconnect your channel.");
 
   const data = (await res.json()) as {
     access_token: string;

@@ -29,7 +29,7 @@ export async function createCheckoutSession(priceId: PriceId) {
   });
 
   if (!serverSession?.user?.id) {
-    throw new Error("User not found");
+    throw new Error("Your session has expired. Please log in again to purchase credits.");
   }
 
   const session = await stripe.checkout.sessions.create({
@@ -41,7 +41,7 @@ export async function createCheckoutSession(priceId: PriceId) {
   });
 
   if (!session.url) {
-    throw new Error("Failed to create session URL");
+    throw new Error("We couldn't open the checkout page. Please try again in a moment.");
   }
 
   redirect(session.url);
