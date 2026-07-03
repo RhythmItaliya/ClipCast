@@ -1,0 +1,307 @@
+# 02 — Database schema
+
+`clipcast-frontend/prisma/schema.prisma`, Postgres via Supabase. Apply it with:
+
+```bash
+cd clipcast-frontend
+npx prisma db push       # dev: push schema straight to the DB, no migration files
+npx prisma migrate deploy   # production: apply committed migrations
+```
+
+This project uses `db push` for local dev (fast iteration, no migration
+history) — see the `build` script in `package.json`, which runs
+`prisma db push && next build`.
+
+## Models
+
+### Auth (NextAuth's Prisma adapter shape)
+
+- **`User`** — the core account. `role` (`USER`/`ADMIN` enum) gates the admin
+  panel; `credits` is the billing balance; `banned` blocks sign-in outright;
+  `password` is a bcrypt hash (nullable — OAuth-only users have none);
+  `stripeCustomerId` links to Stripe; the `youtube*` fields hold the
+  channel-connect OAuth tokens; `createdAt`/`updatedAt` are used for the admin
+  "joined" date and revalidation.
+- **`Account`** — one row per linked OAuth provider (Discord, Google), managed
+  entirely by `@auth/prisma-adapter`.
+- **`Session`** — present for adapter compatibility; the app actually uses JWT
+  sessions (`session: { strategy: "jwt" }` in `server/auth/config.ts`), so this
+  table stays mostly unused at runtime.
+- **`VerificationToken`** — adapter requirement (email verification flows),
+  unused today since there's no email-verification UI.
+
+### Product data
+
+- **`UploadedFile`** — one row per submitted job (either a direct upload or a
+  YouTube URL). `status` is a free-text state machine: `queued` → `processing`
+  → `processed` | `failed` | `no credits` | `cancelled`. `clipMode` and
+  `isPreview` are copied from the user's submission and read back by the
+  Modal call. Indexed on `(userId, createdAt)` for the dashboard list and
+  `(userId, status)` for usage-limit counting (see
+  [05-uploads-and-queue.md](05-uploads-and-queue.md)).
+- **`Clip`** — one row per rendered output clip, linked to its parent
+  `UploadedFile` (nullable — the source can be deleted while clips remain) and
+  to the owning `User`.
+
+### Billing
+
+- **`Purchase`** — one row per completed Stripe checkout: `pack`, `credits`
+  granted, `amountTotal` (cents), `currency`, and the `stripeSessionId` (unique
+  — this is what makes the webhook idempotent against Stripe's automatic
+  retries). Written in `app/api/stripe/webhook/route.ts`; read by the admin
+  billing page.
+
+### Admin
+
+- **`AdminAuditLog`** — one row per admin mutation (credit adjust, ban/unban,
+  promote/demote, job reset, clip delete). `adminId` is **nullable** with
+  `onDelete: SetNull` — unlike every other relation in this schema — so the
+  trail survives even if the admin's account is later deleted; `adminEmail` is
+  denormalized for the same reason. Written by `logAdminAction()` in
+  `src/actions/admin.ts`, best-effort (a logging failure never fails the
+  underlying mutation).
+
+## How to build it from scratch, step by step
+
+**Step 1 — install Prisma and point it at Postgres.**
+
+```bash
+cd clipcast-frontend
+npm install prisma @prisma/client @auth/prisma-adapter
+npx prisma init
+```
+
+That creates `prisma/schema.prisma`. Set the datasource to use two connection
+strings — Supabase's pooled port (6543, PgBouncer, no prepared statements —
+safe for serverless/edge runtime queries) for `url`, and its direct port
+(5432, supports DDL) for `directUrl` (Prisma needs a direct connection to run
+`db push`/migrations against a pooler):
+
+```prisma
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider  = "postgresql"
+    url       = env("DATABASE_URL")   // transaction pooler (6543) — runtime queries
+    directUrl = env("DIRECT_URL")     // session pooler (5432) — migrations
+}
+```
+
+**Step 2 — the NextAuth adapter models.** `@auth/prisma-adapter` requires an
+exact shape for `Account`, `Session`, and `VerificationToken` — copy these
+verbatim (field names/types are part of the adapter's contract, not
+negotiable):
+
+```prisma
+model Account {
+    id                       String  @id @default(cuid())
+    userId                   String
+    type                     String
+    provider                 String
+    providerAccountId        String
+    refresh_token            String?
+    access_token             String?
+    expires_at               Int?
+    token_type               String?
+    scope                    String?
+    id_token                 String?
+    session_state            String?
+    user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+    refresh_token_expires_in Int?
+
+    @@unique([provider, providerAccountId])
+    @@index([userId])
+}
+
+model Session {
+    id           String   @id @default(cuid())
+    sessionToken String   @unique
+    userId       String
+    expires      DateTime
+    user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId])
+}
+
+model VerificationToken {
+    identifier String
+    token      String   @unique
+    expires    DateTime
+
+    @@unique([identifier, token])
+}
+```
+
+**Step 3 — the `User` model**, extended well beyond what the adapter
+requires — this is where product-specific fields live: a `Role` enum for
+admin gating, the credit balance, ban flag, Stripe customer link, and the
+YouTube channel-connect OAuth tokens:
+
+```prisma
+enum Role {
+    USER
+    ADMIN
+}
+
+model User {
+    id               String    @id @default(cuid())
+    name             String?
+    email            String    @unique
+    emailVerified    DateTime?
+    password         String?              // bcrypt hash; null for OAuth-only accounts
+    role             Role      @default(USER)
+    credits          Int       @default(10)
+    banned           Boolean   @default(false)
+    stripeCustomerId String?   @unique
+    image            String?
+    accounts         Account[]
+    sessions         Session[]
+
+    uploadedFiles UploadedFile[]
+    clips         Clip[]
+    purchases     Purchase[]
+    auditLogs     AdminAuditLog[] @relation("AuditActor")
+
+    youtubeChannelId    String?
+    youtubeChannelName  String?
+    youtubeAccessToken  String?
+    youtubeRefreshToken String?
+    youtubeTokenExpiry  DateTime?
+
+    createdAt DateTime @default(now())
+    // @default(now()) alongside @updatedAt gives existing rows a DB-level
+    // default — without it, `db push` refuses to add a NOT NULL column to a
+    // table that already has rows.
+    updatedAt DateTime @default(now()) @updatedAt
+}
+```
+
+**Step 4 — the product models.** `UploadedFile` is one row per submitted job;
+`status` is a plain string state machine (not a Prisma enum) precisely because
+new statuses (`"no credits"`, `"cancelled"`) were added after the fact without
+a migration:
+
+```prisma
+model UploadedFile {
+    id           String   @id @default(cuid())
+    s3Key        String
+    displayName  String?
+    youtubeUrl   String?
+    uploaded     Boolean  @default(false)
+    status       String   @default("queued") // queued|processing|processed|failed|no credits|cancelled
+    clipMode     String?  @default("qa")
+    isPreview    Boolean? @default(false)
+    duration     Int?
+    errorMessage String?
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+
+    clips Clip[]
+    user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId String
+
+    @@index([s3Key])
+    @@index([userId, createdAt])  // dashboard list + rolling-24h upload count
+    @@index([userId, status])     // active-job counts for usage limits
+}
+
+model Clip {
+    id        String  @id @default(cuid())
+    s3Key     String
+    isPreview Boolean @default(false)
+    clipMode  String  @default("qa")
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    uploadedFile   UploadedFile? @relation(fields: [uploadedFileId], references: [id], onDelete: Cascade)
+    uploadedFileId String?
+    user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+    userId         String
+
+    @@index([s3Key])
+    @@index([userId])
+    @@index([uploadedFileId])
+}
+```
+
+**Step 5 — billing ledger.** `stripeSessionId` is `@unique` specifically so
+the webhook handler can check "have I already recorded this checkout?" before
+crediting anything — that uniqueness constraint *is* the idempotency guard
+(see [07-billing-and-credits.md](07-billing-and-credits.md)):
+
+```prisma
+model Purchase {
+    id               String   @id @default(cuid())
+    userId           String
+    user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    stripeSessionId  String   @unique
+    stripeCustomerId String?
+    priceId          String
+    pack             String   // "small" | "medium" | "large"
+    credits          Int
+    amountTotal      Int      // cents
+    currency         String
+    createdAt        DateTime @default(now())
+
+    @@index([userId])
+}
+```
+
+**Step 6 — the audit log.** The one relation in this whole schema that's
+deliberately *not* `onDelete: Cascade`:
+
+```prisma
+model AdminAuditLog {
+    id         String   @id @default(cuid())
+    adminId    String?
+    // Nullable + SetNull (not Cascade) so the trail survives even if the
+    // acting admin's account is later deleted. adminEmail is denormalized
+    // for the same reason — don't rely on the relation to know who did it.
+    admin      User?    @relation("AuditActor", fields: [adminId], references: [id], onDelete: SetNull)
+    adminEmail String
+    action     String   // "credits.adjust" | "user.ban" | "user.promote" | "job.reset" | "clip.delete" | ...
+    targetType String   // "user" | "job" | "clip"
+    targetId   String?
+    detail     String?
+    createdAt  DateTime @default(now())
+
+    @@index([adminId])
+    @@index([createdAt])
+}
+```
+
+**Step 7 — apply it.**
+
+```bash
+npx prisma db push       # dev — pushes the schema straight to Postgres, no migration files
+npx prisma generate      # regenerate the typed client (db push does this automatically)
+```
+
+For production, use migration history instead of `db push` so schema changes
+are reviewable and reversible: `npx prisma migrate dev` (create a migration
+locally) and `npx prisma migrate deploy` (apply committed migrations in CI/CD).
+
+## A schema gotcha worth knowing
+
+Prisma's generated `select`/`include` types in this project do **not** always
+flag an unknown or missing field name as a `tsc` error — they only fail at
+**runtime** (`PrismaClientValidationError`). This has caused a real bug before
+(a `select` referencing a field that didn't exist on `User`, clean `tsc`, but a
+crash on every page load). When you change a `select` shape, don't trust a
+clean typecheck alone — run a quick throwaway script:
+
+```bash
+cd clipcast-frontend
+node --env-file=.env -e "
+const { PrismaClient } = require('@prisma/client');
+const db = new PrismaClient();
+db.user.findFirst({ select: { /* your shape */ } }).then(r => { console.log(r); db.\$disconnect(); });
+"
+```
+
+## Next
+
+[03-authentication-and-roles.md](03-authentication-and-roles.md) — wiring
+NextAuth on top of this schema.
