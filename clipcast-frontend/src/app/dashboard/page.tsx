@@ -46,6 +46,7 @@ export default async function DashboardPage() {
         id: true,
         s3Key: true,
         clipMode: true,
+        title: true,
         createdAt: true,
         uploadedFile: { select: { displayName: true } },
       },
@@ -151,7 +152,7 @@ export default async function DashboardPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">
-                        {clipTitle(c.s3Key, c.clipMode)}
+                        {c.title ?? clipTitle(c.s3Key, c.clipMode)}
                       </div>
                       <div className="text-muted-foreground truncate text-xs">
                         {c.uploadedFile?.displayName ?? "Deleted source"}

@@ -11,6 +11,8 @@ type AdminClip = {
   s3Key: string;
   clipMode: string;
   isPreview: boolean;
+  title: string | null;
+  duration: number | null;
   createdAt: Date;
   user: { id: string; email: string; name: string | null };
   uploadedFile: { displayName: string | null } | null;
@@ -95,14 +97,14 @@ export function ClipsTable({
                     key={clip.id}
                     className="hover:bg-surface/50 transition-colors"
                   >
-                    {/* Clip filename */}
+                    {/* Clip title (AI-generated, falls back to filename) */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         <div className="bg-brand-soft text-brand grid size-8 shrink-0 place-items-center rounded-lg">
                           <Film className="size-3.5" />
                         </div>
                         <span className="max-w-[140px] truncate font-medium capitalize">
-                          {filename.replace(/[_-]+/g, " ")}
+                          {clip.title ?? filename.replace(/[_-]+/g, " ")}
                         </span>
                       </div>
                     </td>

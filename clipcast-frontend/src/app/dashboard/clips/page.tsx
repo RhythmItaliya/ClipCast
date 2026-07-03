@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { getClipThumbnailUrls } from "~/actions/clips";
 import { ClipsGrid, type ClipGroup } from "~/components/dashboard/clips-grid";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
@@ -44,12 +45,18 @@ export default async function ClipsPage() {
       s3Key: true,
       clipMode: true,
       isPreview: true,
+      title: true,
+      duration: true,
       createdAt: true,
       uploadedFileId: true,
       uploadedFile: { select: { displayName: true } },
     },
     orderBy: { createdAt: "desc" },
   });
+
+  // Clips rendered before thumbnails existed have no thumbnailS3Key; only
+  // batch-presign the ones that do.
+  const thumbnailUrls = await getClipThumbnailUrls(clips.map((c) => c.id));
 
   // Group clips by their source video, newest source first.
   const groups: ClipGroup[] = [];
@@ -68,9 +75,13 @@ export default async function ClipsPage() {
     }
     group.clips.push({
       id: clip.id,
-      title: clipTitle(clip.s3Key, clip.clipMode),
+      // AI-generated title (see CLIP_MODE_PROMPTS in the processor) falls
+      // back to a filename-derived one for clips rendered before this existed.
+      title: clip.title ?? clipTitle(clip.s3Key, clip.clipMode),
       clipMode: clip.clipMode,
       isPreview: clip.isPreview,
+      duration: clip.duration,
+      thumbnailUrl: thumbnailUrls[clip.id] ?? null,
       createdAt: relativeTime(clip.createdAt),
     });
   }

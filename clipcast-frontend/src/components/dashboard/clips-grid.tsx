@@ -25,8 +25,17 @@ export type ClipItem = {
   title: string;
   clipMode: string;
   isPreview: boolean;
+  duration?: number | null;
+  thumbnailUrl?: string | null;
   createdAt: string;
 };
+
+/** Formats seconds as "m:ss" for the duration badge. */
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 export type ClipGroup = {
   id: string;
@@ -195,7 +204,9 @@ function ClipCard({
 
   return (
     <article className="group border-border bg-background hover:border-brand/40 hover:shadow-brand/5 overflow-hidden rounded-2xl border transition-all hover:-translate-y-0.5 hover:shadow-lg">
-      <div className={`relative aspect-[9/12] bg-gradient-to-br ${gradient}`}>
+      <div
+        className={`relative aspect-[9/12] ${clip.thumbnailUrl ? "bg-black" : `bg-gradient-to-br ${gradient}`}`}
+      >
         {videoUrl ? (
           <video
             src={videoUrl}
@@ -206,6 +217,13 @@ function ClipCard({
           />
         ) : (
           <>
+            {clip.thumbnailUrl && (
+              <img
+                src={clip.thumbnailUrl}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+            )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/10" />
             <button
               onClick={handlePlay}
@@ -225,6 +243,11 @@ function ClipCard({
               {clip.isPreview ? "Preview · " : ""}
               {clip.clipMode}
             </span>
+            {typeof clip.duration === "number" && clip.duration > 0 && (
+              <span className="absolute right-3 bottom-3 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
+                {formatDuration(clip.duration)}
+              </span>
+            )}
           </>
         )}
       </div>
