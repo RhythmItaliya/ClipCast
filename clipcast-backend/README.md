@@ -1,19 +1,20 @@
 # ClipCast Modal backend
 
-ClipCast uses two independently deployed Modal apps. Local development runs only
-Next.js and Inngest; video downloads and GPU processing stay in Modal.
+ClipCast uses two independently deployed [Modal](https://modal.com) apps. Local
+development runs only Next.js and Inngest; video downloads and GPU processing
+stay in the cloud — nothing here runs on your machine.
 
 ## Services
 
 ```
 clipcast-backend/
 ├── apps/
-│   ├── processor/             clipcast (L40S GPU)
+│   ├── processor/             clipcast (L40S GPU) — see apps/processor/README.md
 │   │   ├── main.py
 │   │   ├── requirements.txt
 │   │   ├── asd/
 │   │   └── deploy.sh
-│   └── downloader/            clipcast-downloader (CPU)
+│   └── downloader/            clipcast-downloader (CPU) — see apps/downloader/README.md
 │       ├── main.py
 │       └── deploy.sh
 ├── scripts/
@@ -21,6 +22,12 @@ clipcast-backend/
 │   └── test_pipeline.py       end-to-end pipeline test
 └── deploy.sh                  deploy one service or both
 ```
+
+- **[apps/downloader](apps/downloader/README.md)** — receives a YouTube URL,
+  downloads it through rotating free proxies, uploads the source to S3.
+- **[apps/processor](apps/processor/README.md)** — the GPU worker: transcribes,
+  picks clip-worthy moments with Gemini, reframes to 9:16 with active-speaker
+  tracking, burns in captions, uploads clips to S3.
 
 The app names are intentionally stable so redeployment updates the existing
 Modal apps and preserves the frontend endpoint URLs.
