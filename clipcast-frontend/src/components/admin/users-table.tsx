@@ -5,11 +5,13 @@ import {
   CheckCircle2,
   ChevronDown,
   CreditCard,
+  Eye,
   Loader2,
   Shield,
   ShieldOff,
   User,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -174,15 +176,20 @@ function UserRow({ user }: { user: AdminUser }) {
     <tr className={`transition-colors hover:bg-surface/50 ${user.banned ? "opacity-50" : ""}`}>
       {/* User */}
       <td className="px-4 py-3">
-        <div className="flex items-center gap-2.5">
+        <Link
+          href={`/admin/users/${user.id}`}
+          className="group flex items-center gap-2.5"
+        >
           <div className="bg-brand-soft text-brand grid size-8 shrink-0 place-items-center rounded-full text-xs font-semibold uppercase">
             {displayName.charAt(0)}
           </div>
           <div className="min-w-0">
-            <div className="truncate font-medium">{displayName}</div>
+            <div className="truncate font-medium group-hover:underline">
+              {displayName}
+            </div>
             <div className="text-muted-foreground truncate text-xs">{user.email}</div>
           </div>
-        </div>
+        </Link>
       </td>
 
       {/* Role badge */}
@@ -229,6 +236,15 @@ function UserRow({ user }: { user: AdminUser }) {
             <Loader2 className="text-muted-foreground size-4 animate-spin" />
           ) : (
             <>
+              {/* View detail */}
+              <Link
+                href={`/admin/users/${user.id}`}
+                title="View user detail"
+                className="border-border bg-surface hover:bg-surface-2 rounded-md border p-1.5 transition-colors"
+              >
+                <Eye className="size-3.5" />
+              </Link>
+
               {/* Credit adjust */}
               {showCreditInput ? (
                 <div className="flex items-center gap-1">

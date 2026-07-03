@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  DollarSign,
   Film,
   LayoutDashboard,
   ListChecks,
   LogOut,
+  ScrollText,
   Shield,
   Users,
 } from "lucide-react";
@@ -39,6 +41,18 @@ const nav = [
     to: "/admin/clips",
     icon: Film,
     description: "All rendered clips across all users.",
+  },
+  {
+    title: "Billing",
+    to: "/admin/billing",
+    icon: DollarSign,
+    description: "Revenue and credit-pack purchases.",
+  },
+  {
+    title: "Audit Log",
+    to: "/admin/audit",
+    icon: ScrollText,
+    description: "Every admin action, who did it, and when.",
   },
 ] as const;
 

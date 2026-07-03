@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  Coins,
   Film,
   ListChecks,
   ShieldOff,
@@ -8,10 +9,11 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { getAdminStats } from "~/actions/admin";
+import { getAdminRevenueStats, getAdminStats } from "~/actions/admin";
+import { formatCents } from "~/lib/utils";
 
 export default async function AdminOverviewPage() {
-  const stats = await getAdminStats();
+  const [stats, revenue] = await Promise.all([getAdminStats(), getAdminRevenueStats()]);
 
   return (
     <div className="space-y-6">
@@ -67,6 +69,13 @@ export default async function AdminOverviewPage() {
           href="/admin/users"
           accent={stats.bannedUsers > 0 ? "destructive" : "brand"}
         />
+        <StatCard
+          icon={<Coins className="size-4" />}
+          label="Total Revenue"
+          value={formatCents(revenue.totalRevenueCents)}
+          href="/admin/billing"
+          accent="brand"
+        />
       </div>
 
       {/* Quick links */}
@@ -102,7 +111,7 @@ function StatCard({
 }: {
   icon: ReactNode;
   label: string;
-  value: number;
+  value: number | string;
   href: string;
   accent: Accent;
 }) {
