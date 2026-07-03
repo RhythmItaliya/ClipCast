@@ -35,7 +35,7 @@ src/
 The dashboard's **Clip Mode** selector drives which moments the backend extracts.
 The selected value flows: UI → `actions/generation.ts` → Inngest event →
 Modal `clip_mode` → the matching prompt in `CLIP_MODE_PROMPTS`
-(`clipcast-backend/pipeline/main.py`). Modes: **All**, **Q&A**, **Educational**,
+(`clipcast-backend/apps/processor/main.py`). Modes: **All**, **Q&A**, **Educational**,
 **Motivational**, **Highlights**.
 
 ## Credits
