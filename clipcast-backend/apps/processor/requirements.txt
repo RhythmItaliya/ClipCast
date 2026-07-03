@@ -38,6 +38,12 @@ transformers==4.39.3
 accelerate>=0.25.0
 datasets>=2.16.0
 
+# ── vllm — HF fallback LLM (Qwen2.5-72B-Instruct-AWQ) ─────────────────────────
+# vllm is installed via run_commands in the image build (needs --extra-index-url
+# for the correct CUDA wheel). Listed here for audit purposes only.
+# vllm==0.4.3  ← installed in image definition, not here
+huggingface-hub>=0.22.0
+
 # ── Utility ────────────────────────────────────────────────────────────────────
 tqdm>=4.66.0
 pandas>=2.0.0

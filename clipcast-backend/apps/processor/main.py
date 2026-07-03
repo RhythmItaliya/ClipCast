@@ -33,6 +33,7 @@ from google import genai
 import pysubs2
 from tqdm import tqdm
 
+
 class ProcessVideoRequest(BaseModel):
     s3_key: str
     youtube_url: str | None = None
@@ -537,6 +538,52 @@ class ClipCast:
         print("Created gemini client...")
 
     @modal.method()
+    def identify_moments(self, transcript, clip_mode="qa"):
+        """Select clip moments from the transcript using Gemini 2.5 Flash."""
+        prompt = CLIP_MODE_PROMPTS.get(clip_mode, CLIP_MODE_PROMPTS["qa"])
+        full_prompt = prompt + str(transcript)
+
+        def _clean_and_validate(raw: str | None) -> list | None:
+            """Strip code fences, parse JSON, return list or None on failure."""
+            if not raw:
+                return None
+            cleaned = raw.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[len("```json"):].strip()
+            elif cleaned.startswith("```"):
+                cleaned = cleaned[3:].strip()
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3].strip()
+            if cleaned and not cleaned.endswith("]"):
+                last_bracket = cleaned.rfind("}")
+                if last_bracket != -1:
+                    cleaned = cleaned[: last_bracket + 1] + "]"
+            try:
+                parsed = json.loads(cleaned)
+                if isinstance(parsed, list):
+                    return parsed
+                return None
+            except json.JSONDecodeError:
+                return None
+
+        try:
+            response = self.gemini_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=full_prompt,
+            )
+            gemini_raw = response.text
+            print(f"Gemini response (first 200 chars): {(gemini_raw or '')[:200]!r}")
+            moments = _clean_and_validate(gemini_raw)
+            if moments is not None:
+                print(f"Gemini identified {len(moments)} moment(s)")
+                return json.dumps(moments)
+            print(f"Gemini returned non-JSON: {(gemini_raw or '')[:300]!r}")
+            return json.dumps([])
+        except Exception as err:
+            print(f"Gemini failed: {err}")
+            return json.dumps([])
+
+    @modal.method()
     def transcribe_video(self, base_dir, video_path):
         import torch
         import whisperx
@@ -573,16 +620,6 @@ class ClipCast:
         torch.cuda.empty_cache()
         return json.dumps(segments)
 
-    @modal.method()
-    def identify_moments(self, transcript, clip_mode="qa"):
-        prompt = CLIP_MODE_PROMPTS.get(clip_mode, CLIP_MODE_PROMPTS["qa"])
-        response = self.gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt + str(transcript)
-        )
-        print(f"Identified moments response: {response.text}")
-        return response.text
-
     @modal.fastapi_endpoint(method="POST")
     def process_video(
         self,
@@ -604,31 +641,94 @@ class ClipCast:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Download the YouTube source to S3 with download_youtube_video before starting GPU processing.",
             )
-        boto3.client("s3").download_file(
-            os.environ["S3_BUCKET_NAME"], request.s3_key, str(video_path)
-        )
+
+        # ── Download source from S3 ──────────────────────────────────────────
+        try:
+            boto3.client("s3").download_file(
+                os.environ["S3_BUCKET_NAME"], request.s3_key, str(video_path)
+            )
+        except Exception as s3_err:
+            err_str = str(s3_err)
+            if "NoSuchKey" in err_str or "404" in err_str:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=(
+                        f"S3 source not found: {request.s3_key}. "
+                        "Make sure the YouTube download completed before starting processing."
+                    ),
+                ) from s3_err
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to download source from S3: {err_str[:400]}",
+            ) from s3_err
         print(f"S3 download complete: {request.s3_key}")
 
-        transcript_segments = json.loads(self.transcribe_video.local(base_dir, video_path))
+        # ── Validate the downloaded file is a playable video ────────────────
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=size,duration",
+             "-of", "json", str(video_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        if probe.returncode != 0 or not video_path.stat().st_size:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "The downloaded file is not a valid video. "
+                    "The source may have been corrupted during download or the S3 upload was incomplete."
+                ),
+            )
 
-        print(f"Identifying clip moments (mode={request.clip_mode})")
-        identified_moments_raw = self.identify_moments.local(transcript_segments, clip_mode=request.clip_mode)
-
-        # Gemini may return an empty string or prose (e.g. for a video with no
-        # usable speech) instead of a JSON array. Strip code fences and parse
-        # defensively so "no moments" yields zero clips instead of a 500.
-        cleaned = (identified_moments_raw or "").strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[len("```json"):].strip()
-        elif cleaned.startswith("```"):
-            cleaned = cleaned[len("```"):].strip()
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3].strip()
-
+        # ── Transcription ────────────────────────────────────────────────────
         try:
-            clip_moments = json.loads(cleaned) if cleaned else []
+            transcript_json = self.transcribe_video.local(base_dir, video_path)
+            transcript_segments = json.loads(transcript_json)
+        except subprocess.CalledProcessError as ffmpeg_err:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Audio extraction failed (ffmpeg error). "
+                    f"The video may have no audio track or an unsupported codec. "
+                    f"stderr: {(ffmpeg_err.stderr or '')[:300]}"
+                ),
+            ) from ffmpeg_err
+        except RuntimeError as cuda_err:
+            err_str = str(cuda_err)
+            if "out of memory" in err_str.lower() or "cuda" in err_str.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=(
+                        "GPU out of memory during transcription. "
+                        "The video is likely too long. Try a shorter clip (< 30 min), "
+                        "or use preview_only=true to skip the full transcription pipeline."
+                    ),
+                ) from cuda_err
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Transcription failed: {err_str[:400]}",
+            ) from cuda_err
+        except Exception as transcribe_err:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Transcription failed unexpectedly: {str(transcribe_err)[:400]}",
+            ) from transcribe_err
+
+        if not transcript_segments:
+            print("Warning: transcript is empty — no speech detected in video")
+
+        # ── Moment identification (Gemini → HF fallback) ─────────────────────
+        # identify_moments handles all errors internally. It returns a JSON
+        # string (always valid) — Gemini first, then Qwen2.5-72B-AWQ if Gemini
+        # fails. It never raises; failure returns json.dumps([]).
+        print(f"Identifying clip moments (mode={request.clip_mode})")
+        identified_moments_raw = self.identify_moments.local(
+            transcript_segments, clip_mode=request.clip_mode
+        )
+
+        # Parse the returned JSON string (always valid — guaranteed by identify_moments)
+        try:
+            clip_moments = json.loads(identified_moments_raw) if identified_moments_raw else []
         except json.JSONDecodeError:
-            print(f"Gemini returned non-JSON, treating as no clips. Raw: {cleaned[:200]!r}")
+            print(f"Unexpected non-JSON from identify_moments: {identified_moments_raw[:200]!r}")
             clip_moments = []
         if not clip_moments or not isinstance(clip_moments, list):
             print("No valid clip moments identified")
@@ -650,12 +750,12 @@ class ClipCast:
             duration = 0
         if not duration or duration <= 0:
             try:
-                probe = subprocess.run(
+                probe_dur = subprocess.run(
                     ["ffprobe", "-v", "error", "-show_entries", "format=duration",
                      "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
                     capture_output=True, text=True, timeout=60,
                 )
-                duration = float((probe.stdout or "0").strip() or 0)
+                duration = float((probe_dur.stdout or "0").strip() or 0)
             except Exception:
                 duration = 0
 
@@ -681,15 +781,50 @@ class ClipCast:
             if len(valid_moments) == 12:
                 break
 
+        # ── Render clips ─────────────────────────────────────────────────────
+        clips_rendered = 0
+        clip_errors = []
         for index, moment in enumerate(valid_moments):
             print(f"Processing clip {index} ({'PREVIEW' if request.preview_only else 'FULL'}) "
                   f"from {moment['start']} to {moment['end']}")
-            if request.preview_only:
-                create_preview_clip(base_dir, video_path, request.s3_key, moment["start"], moment["end"], index)
-            else:
-                process_clip(base_dir, video_path, request.s3_key, moment["start"], moment["end"], index, transcript_segments)
+            try:
+                if request.preview_only:
+                    create_preview_clip(
+                        base_dir, video_path, request.s3_key,
+                        moment["start"], moment["end"], index
+                    )
+                else:
+                    process_clip(
+                        base_dir, video_path, request.s3_key,
+                        moment["start"], moment["end"], index, transcript_segments
+                    )
+                clips_rendered += 1
+            except subprocess.CalledProcessError as ffmpeg_err:
+                msg = (
+                    f"Clip {index} ffmpeg render failed "
+                    f"(start={moment['start']}, end={moment['end']}): "
+                    f"{(ffmpeg_err.stderr or '')[:300]}"
+                )
+                print(f"Warning: {msg}")
+                clip_errors.append(msg)
+                # Continue rendering remaining clips instead of aborting all
+            except Exception as clip_err:
+                msg = f"Clip {index} failed: {str(clip_err)[:200]}"
+                print(f"Warning: {msg}")
+                clip_errors.append(msg)
 
-        return {"success": True, "duration": duration, "clips_found": len(valid_moments)}
+        if clip_errors:
+            print(f"Clip render warnings ({len(clip_errors)} of {len(valid_moments)} failed):")
+            for e in clip_errors:
+                print(f"  • {e}")
+
+        return {
+            "success": True,
+            "duration": duration,
+            "clips_found": len(valid_moments),
+            "clips_rendered": clips_rendered,
+            **({"clip_warnings": clip_errors} if clip_errors else {}),
+        }
 
 
 @app.local_entrypoint()

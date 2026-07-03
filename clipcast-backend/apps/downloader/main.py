@@ -252,6 +252,18 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str):
             )
 
         source_path = max(candidates, key=lambda path: path.stat().st_size)
+
+        # Validate the file is a real video before uploading to S3
+        if source_path.stat().st_size < 1024:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    "Download produced an empty or near-empty file. "
+                    "The video may be restricted, private, or the proxy returned garbage. "
+                    f"File size: {source_path.stat().st_size} bytes."
+                ),
+            )
+
         probe = subprocess.run(
             [
                 "ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -266,13 +278,30 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str):
         except ValueError:
             duration = 0.0
 
-        boto3.client("s3").upload_file(
-            str(source_path),
-            os.environ["S3_BUCKET_NAME"],
-            s3_key,
-            ExtraArgs={"ContentType": "video/mp4"},
-        )
-        print(f"Uploaded cloud source to S3 key {s3_key}")
+        # Log a warning if ffprobe couldn't read the file (may be corrupt)
+        if probe.returncode != 0:
+            print(
+                f"Warning: ffprobe could not read downloaded file "
+                f"(returncode={probe.returncode}): {probe.stderr[:200]}"
+            )
+
+        try:
+            boto3.client("s3").upload_file(
+                str(source_path),
+                os.environ["S3_BUCKET_NAME"],
+                s3_key,
+                ExtraArgs={"ContentType": "video/mp4"},
+            )
+        except Exception as s3_err:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=(
+                    f"Downloaded video successfully but S3 upload failed: {str(s3_err)[:400]}. "
+                    "Check AWS credentials and S3 bucket permissions."
+                ),
+            ) from s3_err
+
+        print(f"Uploaded cloud source to S3 key {s3_key} ({source_path.stat().st_size / 1_048_576:.1f} MB)")
         return {
             "success": True,
             "s3_key": s3_key,
