@@ -54,8 +54,11 @@ export async function generateUploadUrl(fileInfo: {
       ContentType: fileInfo.contentType,
     });
 
+    // 10 minutes was fine for small clips, but nowhere near enough for a
+    // multi-GB, multi-hour video on a typical home upload connection (a 4GB
+    // file at ~5 Mbps upload takes well over an hour). Give it real headroom.
     const signedUrl = await getSignedUrl(s3Client, command, {
-      expiresIn: 600,
+      expiresIn: 10800, // 3 hours
     });
 
     const uploadedFileDbRecord = await db.uploadedFile.create({

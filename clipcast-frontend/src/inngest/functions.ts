@@ -142,8 +142,11 @@ export const processVideoFn = inngest.createFunction(
 
           // Step 3 — poll loop using proper Inngest step.sleep between polls.
           // Each poll is a separate step.run so Inngest can replay them safely.
-          // MAX 40 poll attempts × 30-45s ≈ up to ~30 minutes of polling.
-          const MAX_POLL_ATTEMPTS = 40;
+          // Backoff caps at 60s/poll, so this budgets ~85 minutes of polling,
+          // comfortably above the downloader's own OVERALL_DEADLINE_SECONDS
+          // (3600s / 60 min, see apps/downloader/main.py) for a multi-hour
+          // source downloaded through a rotating free proxy.
+          const MAX_POLL_ATTEMPTS = 90;
           let downloadData: CloudDownloaderResponse | null = null;
 
           for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
@@ -180,7 +183,7 @@ export const processVideoFn = inngest.createFunction(
 
           if (!downloadData) {
             throw new Error(
-              "YTDLP_ERROR: Cloud download did not finish within 40 poll attempts (~30 min). " +
+              "YTDLP_ERROR: Cloud download did not finish within 90 poll attempts (~85 min). " +
               "The video may be too long or the proxy is blocked.",
             );
           }

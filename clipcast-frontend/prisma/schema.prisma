@@ -71,7 +71,7 @@ model User {
     emailVerified DateTime?
     password      String?
     role          Role      @default(USER)
-    credits       Int @default(10)
+    credits       Int @default(20)
     banned        Boolean   @default(false)
     stripeCustomerId String? @unique
     image         String?
