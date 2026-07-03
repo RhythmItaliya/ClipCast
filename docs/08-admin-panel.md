@@ -1,8 +1,8 @@
-# ClipCast — 08 — Admin panel
+# ClipCast 08: Admin panel
 
 Everything lives under `src/app/admin/`, guarded by
 `src/app/admin/layout.tsx` (see [03-authentication-and-roles.md](03-authentication-and-roles.md)
-for the two-layer RBAC — layout redirect + per-action `requireAdmin()`).
+for the two-layer RBAC: layout redirect + per-action `requireAdmin()`).
 All reads/writes go through `src/actions/admin.ts`. Nav is one array in
 `src/components/admin/shell.tsx` driving both the sidebar and the topbar.
 
@@ -11,7 +11,7 @@ All reads/writes go through `src/actions/admin.ts`. Nav is one array in
 | Route | Purpose | Key files |
 |---|---|---|
 | `/admin` | Platform stats at a glance (users, clips, jobs, active/failed jobs, banned users, total revenue), quick links | `app/admin/page.tsx`, `getAdminStats()`/`getAdminRevenueStats()` |
-| `/admin/users` | Every account — search-free paginated table, inline credit adjust / role toggle / ban toggle | `components/admin/users-table.tsx`, `getAdminUsers()` |
+| `/admin/users` | Every account, search-free paginated table, inline credit adjust / role toggle / ban toggle | `components/admin/users-table.tsx`, `getAdminUsers()` |
 | `/admin/users/[id]` | One user's full picture: profile, credits/role/ban controls, recent jobs, recent clips, purchase history, YouTube/Stripe connection status | `app/admin/users/[id]/page.tsx`, `getAdminUserDetail()` |
 | `/admin/jobs` | Every `UploadedFile` across all users, filterable by status, "reset stuck job(s)" | `components/admin/jobs-table.tsx`, `getAdminJobs()` / `resetSingleJob()` / `resetAllStuckJobs()` |
 | `/admin/clips` | Every rendered `Clip` across all users, delete the DB record (does not touch S3) | `components/admin/clips-table.tsx`, `getAdminClips()` / `deleteAdminClip()` |
@@ -26,7 +26,7 @@ called from every mutating action: `adjustUserCredits` → `"credits.adjust"`,
 `setUserBanned` → `"user.ban"`/`"user.unban"`, `setUserRole` →
 `"user.promote"`/`"user.demote"`, `resetSingleJob`/`resetAllStuckJobs` →
 `"job.reset"`/`"job.reset_all"`, `deleteAdminClip` → `"clip.delete"`. Logging
-is best-effort — wrapped in its own `.catch()` so a logging failure can never
+is best-effort, wrapped in its own `.catch()` so a logging failure can never
 fail the actual mutation the admin intended.
 
 `requireAdmin()` returns `{ id, email }` specifically so these calls can
@@ -36,7 +36,7 @@ attribute the log entry without a second DB query per action.
 
 Every admin route has a `loading.tsx` pairing one of three shared skeletons
 (`src/components/skeletons/`): `AdminStatGridSkeleton` (Overview, Billing's
-stat cards), `AdminTableSkeleton` (Users/Jobs/Clips/Billing/Audit — same
+stat cards), `AdminTableSkeleton` (Users/Jobs/Clips/Billing/Audit, same
 "title + paginated table" shape, parameterized by column count), and
 `AdminUserDetailSkeleton` (the one bespoke layout, for `/admin/users/[id]`).
 
@@ -46,7 +46,7 @@ Every admin page follows the exact same recipe. Here's the whole thing end to
 end, using the real `logAdminAction()` helper and `adjustUserCredits()` action
 as the template:
 
-**Step 1 — the audit-log helper** (`src/actions/admin.ts`):
+**Step 1: the audit-log helper** (`src/actions/admin.ts`):
 
 ```ts
 async function logAdminAction(
@@ -59,7 +59,7 @@ async function logAdminAction(
 }
 ```
 
-**Step 2 — a mutating action**, gated + logged:
+**Step 2: a mutating action**, gated + logged:
 
 ```ts
 export async function adjustUserCredits(userId: string, delta: number) {
@@ -76,7 +76,7 @@ export async function adjustUserCredits(userId: string, delta: number) {
 }
 ```
 
-**Step 3 — a read**, paginated, admin-gated:
+**Step 3: a read**, paginated, admin-gated:
 
 ```ts
 export async function getAdminPurchases(page = 1, pageSize = 30) {
@@ -94,7 +94,7 @@ export async function getAdminPurchases(page = 1, pageSize = 30) {
 }
 ```
 
-**Step 4 — the page** (server component, `app/admin/billing/page.tsx`):
+**Step 4: the page** (server component, `app/admin/billing/page.tsx`):
 
 ```tsx
 export default async function AdminBillingPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
@@ -113,7 +113,7 @@ export default async function AdminBillingPage({ searchParams }: { searchParams:
 }
 ```
 
-**Step 5 — nav entry** (`src/components/admin/shell.tsx` — this one array
+**Step 5: nav entry** (`src/components/admin/shell.tsx`, this one array
 drives both the sidebar and the topbar title/description):
 
 ```ts
@@ -123,7 +123,7 @@ const nav = [
 ] as const;
 ```
 
-**Step 6 — a matching `loading.tsx`** so the page never flashes blank while
+**Step 6: a matching `loading.tsx`** so the page never flashes blank while
 its queries run:
 
 ```tsx
@@ -145,4 +145,4 @@ and a paired skeleton.
 
 ## Next
 
-[09-deployment.md](09-deployment.md) — putting both halves somewhere real.
+[09-deployment.md](09-deployment.md): putting both halves somewhere real.

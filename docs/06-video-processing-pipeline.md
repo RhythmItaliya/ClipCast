@@ -1,15 +1,15 @@
-# ClipCast — 06 — Video processing pipeline (Modal)
+# ClipCast 06: Video processing pipeline (Modal)
 
-Two independently deployed Modal apps. Full detail lives next to the code —
+Two independently deployed Modal apps. Full detail lives next to the code;
 this page is the map between them.
 
-- **[`clipcast-backend/apps/downloader/README.md`](../clipcast-backend/apps/downloader/README.md)**
-  — CPU app. Takes a YouTube URL, downloads it through rotating free proxies
+- **[`clipcast-backend/apps/downloader/README.md`](../clipcast-backend/apps/downloader/README.md)**:
+  CPU app. Takes a YouTube URL, downloads it through rotating free proxies
   (YouTube blocks datacenter IPs), uploads the source to S3. A scheduled Modal
-  function refreshes the proxy ranking every 15 minutes in the background —
+  function refreshes the proxy ranking every 15 minutes in the background,
   never in the request path.
-- **[`clipcast-backend/apps/processor/README.md`](../clipcast-backend/apps/processor/README.md)**
-  — GPU (L40S) app. Downloads the S3 source, transcribes with WhisperX, asks
+- **[`clipcast-backend/apps/processor/README.md`](../clipcast-backend/apps/processor/README.md)**:
+  GPU (L40S) app. Downloads the S3 source, transcribes with WhisperX, asks
   Gemini which moments to clip, reframes to 9:16 following the active speaker
   (TalkNet), burns in captions, uploads clips to S3.
 
@@ -18,7 +18,7 @@ this page is the map between them.
 Downloading is network-bound and needs YouTube-specific workarounds; the GPU
 container should only ever spin up once a source file already exists in S3, so
 it never burns expensive GPU-seconds waiting on a network call. Splitting also
-lets the two scale independently — many concurrent downloads, a small number
+lets the two scale independently: many concurrent downloads, a small number
 of concurrent GPU renders (`max_containers=2` on the processor).
 
 ## Neither app touches the database
@@ -33,23 +33,23 @@ to this job."
 
 ## Local development never runs this
 
-There is no local video processing path at all — `start.sh` only starts
+There is no local video processing path at all. `start.sh` only starts
 Next.js, the Inngest dev worker, and (optionally) the Stripe webhook listener.
 Every video-processing test hits the real deployed Modal endpoints, even in
 development (`clipcast-backend/scripts/test_pipeline.py` runs an end-to-end
-smoke test against them — see the backend README's "End-to-end pipeline test"
+smoke test against them; see the backend README's "End-to-end pipeline test"
 section).
 
 ## How to build the processor from scratch (Modal + FastAPI)
 
-**Step 1 — install and authenticate Modal.**
+**Step 1: install and authenticate Modal.**
 
 ```bash
 pip install modal fastapi whisperx faster-whisper google-genai boto3
 modal token new
 ```
 
-**Step 2 — the class that keeps models warm** (`apps/processor/main.py`).
+**Step 2: the class that keeps models warm** (`apps/processor/main.py`).
 Modal's `@app.cls` + `@modal.enter()` is what makes GPU model loading a
 one-time cost per container instead of a per-request cost:
 
@@ -75,7 +75,7 @@ class ClipCast:
         self.gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 ```
 
-**Step 3 — transcription** (`@modal.method`, called from the endpoint below):
+**Step 3: transcription** (`@modal.method`, called from the endpoint below):
 
 ```python
     @modal.method()
@@ -93,9 +93,9 @@ class ClipCast:
         return json.dumps(segments)
 ```
 
-**Step 4 — moment selection, plus an AI title.** One prompt per clip mode
-(write your own rules per mode — this is the actual `qa` prompt, trimmed).
-The prompt asks Gemini for a `title` alongside each `{start, end}` — free,
+**Step 4: moment selection, plus an AI title.** One prompt per clip mode
+(write your own rules per mode; this is the actual `qa` prompt, trimmed).
+The prompt asks Gemini for a `title` alongside each `{start, end}`, free,
 since it's the same call that already picks the moments, no second API call
 needed:
 
@@ -106,7 +106,7 @@ Each clip must start with the question and end with the answer.
 Rules:
 - Start/end timestamps must match sentence boundaries in the transcript exactly.
 - Include a short, punchy, clickable title for each clip (max 60 characters,
-  no surrounding quotes) in a "title" field — this is shown to viewers, so
+  no surrounding quotes) in a "title" field. This is shown to viewers, so
   make it a hook, not a description.
 - Output only JSON: [{"start": seconds, "end": seconds, "title": "..."}, ...].
 - Target 40-60 second clips. ~1 clip per 5 minutes of source.
@@ -124,10 +124,10 @@ Rules:
         return json.dumps(_clean_and_validate(response.text) or [])
 ```
 
-**Step 5 — the public endpoint** ties it together — download from S3,
+**Step 5: the public endpoint** ties it together: download from S3,
 transcribe, pick moments, render each one (fast preview crop or full
 ASD-tracked render + burned captions + thumbnail), upload clips, and return a
-**structured per-clip list** (not just aggregate counts — this is what the
+**structured per-clip list** (not just aggregate counts; this is what the
 frontend uses to create `Clip` rows directly, instead of guessing at rendered
 filenames by listing the S3 bucket):
 
@@ -158,7 +158,7 @@ filenames by listing the S3 bucket):
 `process_clip()` is where TalkNet active-speaker detection
 (`asd/demoTalkNet.py`), `create_vertical_video()` (9:16 crop following the
 speaker), `create_subtitles_with_ffmpeg()` (burned karaoke captions + subtle
-watermark — see below), and `create_thumbnail()` get chained together — see
+watermark, see below), and `create_thumbnail()` get chained together; see
 [`clipcast-backend/apps/processor/README.md`](../clipcast-backend/apps/processor/README.md)
 for that internal chain in more detail. Each render function returns
 `{"s3_key": ..., "thumbnail_s3_key": ..., "title": ..., "duration": ...}`,
@@ -169,7 +169,7 @@ straight into `db.clip.createMany()` (see
 ## Captions: karaoke word-highlight, no black box
 
 `create_subtitles_with_ffmpeg()` builds one ASS subtitle event **per word**
-(not per multi-word chunk) — each event spans exactly that word's spoken
+(not per multi-word chunk); each event spans exactly that word's spoken
 duration, with the chunk's text rendered plain white except the
 currently-active word, which is wrapped in a color override tag:
 
@@ -189,7 +189,7 @@ for chunk in chunks:               # chunk = list of (word, start_rel, end_rel)
             text=' '.join(styled), style="Default"))
 ```
 
-The style itself has **no drop shadow** (`shadow = 0.0`) — a heavy black
+The style itself has **no drop shadow** (`shadow = 0.0`). A heavy black
 shadow/box behind captions reads as amateur. A thicker outline
 (`outline = 3.0`, black) replaces it for readability over busy footage
 without the black cast.
@@ -207,17 +207,17 @@ WATERMARK_DRAWTEXT = (
 )
 ```
 
-Small, ~55% opacity, thin shadow — sized like a real Reels/TikTok creator
+Small, ~55% opacity, thin shadow, sized like a real Reels/TikTok creator
 watermark rather than a solid, attention-grabbing label. There's no separate
 logo image asset (none exists in the repo); this is a deliberate,
-maintenance-free choice — one ffmpeg `drawtext` filter, no binary asset to
+maintenance-free choice: one ffmpeg `drawtext` filter, no binary asset to
 keep in sync with the brand.
 
 ## Thumbnails
 
 `create_thumbnail()` grabs a single frame via ffmpeg (`-vframes 1`) from the
 **final** rendered output (after captions/watermark, so the preview matches
-what viewers will actually see) at roughly 15% into the clip — early enough to
+what viewers will actually see) at roughly 15% into the clip, early enough to
 be representative, late enough to avoid a black/blank opening frame:
 
 ```python
@@ -230,13 +230,13 @@ Uploaded to S3 as `{clip_name}_thumb.jpg` next to the clip itself. The
 frontend batch-presigns these (`getClipThumbnailUrls()` in
 `src/actions/clips.ts`) rather than making the bucket public.
 
-**Step 6 — the downloader**, in short (full detail + gotchas in
+**Step 6: the downloader**, in short (full detail + gotchas in
 [`clipcast-backend/apps/downloader/README.md`](../clipcast-backend/apps/downloader/README.md)):
 
 ```python
 @app.function(schedule=modal.Period(minutes=15))
 def refresh_proxies() -> None:
-    # runs yt-dlp-proxy's speed test (10-20 min) — NEVER call this from the
+    # runs yt-dlp-proxy's speed test (10-20 min); NEVER call this from the
     # request path, only from this scheduled function
     ranked = _speed_test_free_proxies()
     volume_write_json("proxy.json", ranked[:5])
@@ -255,13 +255,13 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str):
 ## Diagrams
 
 - [`excalidraw/03-video-processing.excalidraw`](excalidraw/03-video-processing.excalidraw)
-  — inside the GPU processor: model loading, transcription, Gemini moment
+  the GPU processor's model loading, transcription, Gemini moment
   selection, the preview/full branch, ASD → reframe → captions.
 - [`excalidraw/04-youtube-ingestion.excalidraw`](excalidraw/04-youtube-ingestion.excalidraw)
-  — the downloader's proxy rotation, plus the separate channel-connect OAuth
+  the downloader's proxy rotation, plus the separate channel-connect OAuth
   flow.
 
 ## Next
 
-[07-billing-and-credits.md](07-billing-and-credits.md) — how the user pays for
+[07-billing-and-credits.md](07-billing-and-credits.md): how the user pays for
 all this.

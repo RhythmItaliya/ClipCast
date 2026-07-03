@@ -1,4 +1,4 @@
-# ClipCast — 01 — Environment & accounts
+# ClipCast 01: Environment & accounts
 
 Before running anything, you need accounts with 7 external services. Everything
 is configured through **one file at the repo root**: `.env`.
@@ -6,16 +6,16 @@ is configured through **one file at the repo root**: `.env`.
 ## Why one shared `.env`
 
 - The frontend loads it via `@next/env`'s `loadEnvConfig('..')` in
-  `clipcast-frontend/next.config.js` (note the `'..'` — one directory up from
+  `clipcast-frontend/next.config.js` (note the `'..'`, one directory up from
   the frontend, i.e. the repo root).
 - The backend's `clipcast-backend/scripts/setup_modal_secret.py` reads the same
   file with `python-dotenv` and pushes the relevant keys into a Modal Secret
-  (Modal containers can't read your local `.env` directly — see
+  (Modal containers can't read your local `.env` directly; see
   [09-deployment.md](09-deployment.md)).
 - One file means no "which `.env` do I edit" confusion, and no risk of the two
   halves drifting out of sync on shared values like `S3_BUCKET_NAME`.
 
-`.env` is gitignored. `.env.example` is the committed template — copy it:
+`.env` is gitignored. `.env.example` is the committed template. Copy it:
 
 ```bash
 cp .env.example .env
@@ -35,21 +35,21 @@ cp .env.example .env
 
 ## Every variable, and who reads it
 
-Validated centrally in `clipcast-frontend/src/env.js` (Zod schema — the app
+Validated centrally in `clipcast-frontend/src/env.js` (Zod schema; the app
 refuses to boot with a missing required var, so this file is the ground truth
 if this table ever drifts).
 
 | Variable | Read by | Purpose |
 |---|---|---|
 | `AUTH_SECRET` | frontend | NextAuth JWT signing secret (`npx auth secret` to generate) |
-| `DATABASE_URL` | frontend (Prisma) | Pooled (port 6543) Postgres URL — used at runtime |
-| `DIRECT_URL` | frontend (Prisma) | Direct (port 5432) Postgres URL — used for `prisma db push`/migrations |
+| `DATABASE_URL` | frontend (Prisma) | Pooled (port 6543) Postgres URL, used at runtime |
+| `DIRECT_URL` | frontend (Prisma) | Direct (port 5432) Postgres URL, used for `prisma db push`/migrations |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` | frontend + both Modal apps | S3 access |
 | `S3_BUCKET_NAME` | frontend + both Modal apps | Shared bucket for sources + clips |
 | `AUTH_DISCORD_ID` / `AUTH_DISCORD_SECRET` | frontend | Discord OAuth |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | frontend | Google OAuth (login) + YouTube channel connect — both optional; the provider is only registered if both are set |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | frontend | Google OAuth (login) + YouTube channel connect, both optional; the provider is only registered if both are set |
 | `PROCESS_VIDEO_ENDPOINT` | frontend | The processor Modal app's public URL |
-| `DOWNLOAD_VIDEO_ENDPOINT` | frontend | The downloader Modal app's public URL (optional — a missing value fails only YouTube jobs, not the whole app) |
+| `DOWNLOAD_VIDEO_ENDPOINT` | frontend | The downloader Modal app's public URL (optional; a missing value fails only YouTube jobs, not the whole app) |
 | `PROCESS_VIDEO_ENDPOINT_AUTH` | frontend + both Modal apps | Shared bearer token protecting both Modal endpoints |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | frontend | Stripe API + webhook signature verification |
 | `STRIPE_SMALL_CREDIT_PACK` / `_MEDIUM_` / `_LARGE_` | frontend | Stripe Price IDs for the 3 credit packs |
@@ -58,7 +58,7 @@ if this table ever drifts).
 | `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | frontend | `"local"`/`"local"` for local dev; real values from the Inngest Cloud dashboard in production |
 | `GEMINI_API_KEY` | processor (Modal) | Gemini moment-selection calls |
 | `YT_DLP_PATH` | downloader (Modal, local dev only) | Path to the `yt-dlp` binary |
-| `YT_DLP_PROXY` | downloader (Modal) | Optional paid residential proxy override — see [`clipcast-backend/apps/downloader/README.md`](../clipcast-backend/apps/downloader/README.md) |
+| `YT_DLP_PROXY` | downloader (Modal) | Optional paid residential proxy override; see [`clipcast-backend/apps/downloader/README.md`](../clipcast-backend/apps/downloader/README.md) |
 
 If you add a new variable, update **both** `.env.example` and
 `clipcast-frontend/src/env.js` (server/client schema + `runtimeEnv` mapping),
@@ -71,14 +71,14 @@ instead of reading `process.env.X` directly everywhere, specifically so a typo
 or a missing var fails loudly at boot instead of producing `undefined` deep
 inside some unrelated request handler months later.
 
-**Step 1 — install it** (already in `package.json`, but if starting fresh):
+**Step 1: install it** (already in `package.json`, but if starting fresh):
 
 ```bash
 npm install @t3-oss/env-nextjs zod
 ```
 
-**Step 2 — write the schema.** This is the actual file,
-`clipcast-frontend/src/env.js` — every var the app touches is declared once,
+**Step 2: write the schema.** This is the actual file,
+`clipcast-frontend/src/env.js`; every var the app touches is declared once,
 split into `server` (only readable in server code) and `client` (must be
 prefixed `NEXT_PUBLIC_` and is bundled into the browser):
 
@@ -99,7 +99,7 @@ export const env = createEnv({
     AUTH_DISCORD_ID: z.string(),
     AUTH_DISCORD_SECRET: z.string(),
     PROCESS_VIDEO_ENDPOINT: z.string(),
-    // Optional so a missing backend URL can't take down the whole frontend —
+    // Optional so a missing backend URL can't take down the whole frontend;
     // only YouTube jobs fail, with a targeted error.
     DOWNLOAD_VIDEO_ENDPOINT: z.string().url().optional(),
     PROCESS_VIDEO_ENDPOINT_AUTH: z.string(),
@@ -153,20 +153,20 @@ export const env = createEnv({
 });
 ```
 
-**Step 3 — use it.** Everywhere else in the codebase, import `{ env }` from
-`~/env` and read `env.SOME_VAR` — never `process.env.SOME_VAR` directly in
+**Step 3: use it.** Everywhere else in the codebase, import `{ env }` from
+`~/env` and read `env.SOME_VAR`, never `process.env.SOME_VAR` directly in
 application code. That's what makes the schema authoritative: if you forget to
 add a var here, TypeScript won't let you reference it, and if the deployed
 environment is missing a required one, the app throws a clear Zod error on
 boot instead of a confusing failure three requests later.
 
-**Step 4 — adding a new variable later.** Three places, every time:
+**Step 4: adding a new variable later.** Three places, every time:
 1. Add it to `.env.example` (documented, placeholder value).
-2. Add it to `src/env.js` — both the `server`/`client` schema *and*
+2. Add it to `src/env.js`, both the `server`/`client` schema *and*
    `runtimeEnv` (easy to forget the second one; the var will silently read as
    `undefined` if you do).
 3. Add it to `.env` locally (and wherever the app is actually deployed).
 
 ## Next
 
-[02-database-schema.md](02-database-schema.md) — set up Postgres with Prisma.
+[02-database-schema.md](02-database-schema.md): set up Postgres with Prisma.

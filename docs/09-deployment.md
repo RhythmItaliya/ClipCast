@@ -1,4 +1,4 @@
-# ClipCast — 09 — Deployment
+# ClipCast 09: Deployment
 
 ## Backend (Modal)
 
@@ -22,11 +22,11 @@ only forwards the keys the deployed code actually reads:
 `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_NAME` (required),
 `YT_DLP_PROXY` (optional).
 
-Each `modal deploy` prints a public HTTPS endpoint URL — paste
+Each `modal deploy` prints a public HTTPS endpoint URL. Paste
 the processor's into `PROCESS_VIDEO_ENDPOINT` and the downloader's into
 `DOWNLOAD_VIDEO_ENDPOINT` in `.env`. The Modal **app names are stable**
 (`clipcast`, `clipcast-downloader`), so redeploying updates the existing app in
-place rather than minting a new URL — you don't need to update these env vars
+place rather than minting a new URL, so you don't need to update these env vars
 again on future deploys, only on first setup.
 
 Redeploy either app independently any time its code changes:
@@ -35,7 +35,7 @@ Redeploy either app independently any time its code changes:
 
 ### What the deploy scripts actually do
 
-`clipcast-backend/scripts/setup_modal_secret.py` — reads `.env`, checks the
+`clipcast-backend/scripts/setup_modal_secret.py`: reads `.env`, checks the
 required keys are present, then shells out to the Modal CLI:
 
 ```python
@@ -69,11 +69,11 @@ modal deploy main.py
 Any Node host that can run `next build`/`next start` works (Vercel, a VPS,
 etc.). Two things matter regardless of host:
 
-1. **Env vars** — same `.env` contents as local dev, provided however your
+1. **Env vars**: same `.env` contents as local dev, provided however your
    host expects (Vercel project env vars, a `.env` on a VPS, etc.). `BASE_URL`
    must match the real deployed URL (it's used to build the Google OAuth
    redirect URI and Stripe's checkout success URL).
-2. **`npm run build`** runs `prisma db push && next build` — the schema is
+2. **`npm run build`** runs `prisma db push && next build`. The schema is
    pushed to the production database as part of every build. For a stricter
    production rollout with migration history instead, use
    `npx prisma migrate deploy` (there's an `npm run db:migrate` script for
@@ -90,7 +90,7 @@ worker).
 ## Local dev orchestration
 
 `./start.sh` from the repo root starts everything that's supposed to run
-locally — and only that:
+locally, and only that:
 
 - Next.js dev server → `:3000`
 - Inngest dev worker → `:8288`
@@ -103,16 +103,18 @@ It refuses to start if `.env` is missing, if Node < 20.9 (auto-switches to
 uncleanly). `./start.sh --deploy` redeploys the Modal backend first, then
 starts the local stack.
 
-`start.sh` also attempts a "clear stuck local jobs" step
-(`npx tsx prisma/reset-stuck-jobs.ts || true`) before starting the servers —
-**that script doesn't currently exist** in `clipcast-frontend/prisma/`, so this
-step silently no-ops (the `|| true` swallows the failure). Leftover
-`queued`/`processing` `UploadedFile` rows from an ungraceful shutdown are
-instead cleared via the admin panel's "Reset All Stuck" button
-(`/admin/jobs`, see [08-admin-panel.md](08-admin-panel.md)) or the existing
-`/api/reset-stuck-jobs` route.
+`start.sh` also runs a "clear stuck local jobs" step
+(`prisma/reset-stuck-jobs.ts`, via `npx tsx`) before starting the servers:
+any `queued`/`processing` `UploadedFile` row left over from a previous
+ungraceful shutdown (its Inngest run is gone, so it would otherwise sit stuck
+forever) gets marked `failed`, same semantics as the admin panel's "Reset All
+Stuck" button (`resetAllStuckJobs()`, see [08-admin-panel.md](08-admin-panel.md)).
+It loads the repo-root `.env` itself via `process.loadEnvFile()` (it runs
+outside Next.js, so `@next/env`'s auto-loading doesn't apply), and the `|| true`
+in `start.sh` means a failure here (e.g. DB unreachable) never blocks the rest
+of the startup.
 
-**Nothing GPU/network-heavy ever runs locally** — that's the entire point of
+**Nothing GPU/network-heavy ever runs locally.** That's the entire point of
 the Modal split (see [06-video-processing-pipeline.md](06-video-processing-pipeline.md)).
 Every video-processing test, even in local development, hits the real deployed
 Modal endpoints.

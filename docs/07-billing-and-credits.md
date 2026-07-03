@@ -1,8 +1,8 @@
-# ClipCast — 07 — Billing & credits
+# ClipCast 07: Billing & credits
 
 ## The credit model
 
-Every `User` has a `credits` integer balance (default 10 on signup — see
+Every `User` has a `credits` integer balance (default 10 on signup; see
 `signUp()` in `src/actions/auth.ts`). One credit = one minute of source video,
 rounded up, minimum 1 credit per job. Direct uploads are gated on an
 estimated/stored duration up front; YouTube jobs true-up the exact charge after
@@ -11,7 +11,7 @@ Modal reports the real duration (see
 
 ## Buying credits
 
-Three fixed one-time packs (small/medium/large — Stripe Price IDs in `.env`:
+Three fixed one-time packs (small/medium/large; Stripe Price IDs in `.env`:
 `STRIPE_SMALL_CREDIT_PACK`, `_MEDIUM_`, `_LARGE_`). Flow:
 
 1. `createCheckoutSession(priceId)` (`src/actions/stripe.ts`) creates a Stripe
@@ -26,8 +26,8 @@ Three fixed one-time packs (small/medium/large — Stripe Price IDs in `.env`:
    the line item's price ID against the three env-configured price IDs) to
    figure out how many credits to grant, resolves the target user (by
    `client_reference_id`, falling back to `stripeCustomerId` lookup for
-   subsequent purchases), increments `User.credits`, and — since the admin
-   billing view was added — writes a `Purchase` ledger row.
+   subsequent purchases), increments `User.credits`, and, since the admin
+   billing view was added, writes a `Purchase` ledger row.
 
 ## Webhook idempotency
 
@@ -36,7 +36,7 @@ Before the `Purchase` ledger existed, a retry would have **silently
 double-credited** the user (there was nothing to detect "I already processed
 this session"). The webhook now checks for an existing `Purchase` with the
 same `stripeSessionId` *before* doing anything else, and returns `200`
-immediately if found — so a Stripe retry is a safe no-op rather than a double
+immediately if found, so a Stripe retry is a safe no-op rather than a double
 charge or (after the `Purchase` table was added) a crash on that column's
 unique constraint.
 
@@ -46,19 +46,19 @@ unique constraint.
 stripe listen --forward-to localhost:3000/api/stripe/webhook
 ```
 
-prints a `whsec_…` value — put it in `STRIPE_WEBHOOK_SECRET`. `start.sh` runs
+prints a `whsec_…` value; put it in `STRIPE_WEBHOOK_SECRET`. `start.sh` runs
 this automatically if the Stripe CLI is installed and logged in.
 
 ## The `Purchase` ledger
 
 Beyond powering `/admin/billing` (see next page), it's also the source of
-truth an admin can point to for "why does this user have N credits" — the
+truth an admin can point to for "why does this user have N credits": the
 per-user detail page shows the last 10 purchases alongside credits/role/ban
 controls.
 
 ## How to build it from scratch
 
-**Step 1 — install and create the 3 Stripe Prices** (Stripe Dashboard →
+**Step 1: install and create the 3 Stripe Prices** (Stripe Dashboard →
 Products, one-time price each), then put the price IDs in `.env` as
 `STRIPE_SMALL_CREDIT_PACK` / `_MEDIUM_` / `_LARGE_`.
 
@@ -66,7 +66,7 @@ Products, one-time price each), then put the price IDs in `.env` as
 npm install stripe
 ```
 
-**Step 2 — create the checkout session** (`src/actions/stripe.ts`, real
+**Step 2: create the checkout session** (`src/actions/stripe.ts`, real
 code):
 
 ```ts
@@ -98,7 +98,7 @@ export async function createCheckoutSession(priceId: PriceId) {
 }
 ```
 
-**Step 3 — the webhook**, `src/app/api/stripe/webhook/route.ts` (the actual
+**Step 3: the webhook**, `src/app/api/stripe/webhook/route.ts` (the actual
 current implementation, idempotency guard included):
 
 ```ts
@@ -143,17 +143,17 @@ export async function POST(req: Request) {
 }
 ```
 
-**Step 4 — local testing.** `stripe listen --forward-to localhost:3000/api/stripe/webhook`
-prints a `whsec_...` — put it in `STRIPE_WEBHOOK_SECRET`, then trigger a test
+**Step 4: local testing.** `stripe listen --forward-to localhost:3000/api/stripe/webhook`
+prints a `whsec_...`; put it in `STRIPE_WEBHOOK_SECRET`, then trigger a test
 purchase from `/dashboard/billing` using [Stripe's test card numbers](https://stripe.com/docs/testing).
 
 ## Diagram
 
-[`excalidraw/02-credits-and-billing.excalidraw`](excalidraw/02-credits-and-billing.excalidraw)
-— the spend loop and the buy loop side by side, plus why the ledger makes the
+[`excalidraw/02-credits-and-billing.excalidraw`](excalidraw/02-credits-and-billing.excalidraw):
+the spend loop and the buy loop side by side, plus why the ledger makes the
 webhook idempotent.
 
 ## Next
 
-[08-admin-panel.md](08-admin-panel.md) — the operational side: managing users,
+[08-admin-panel.md](08-admin-panel.md): the operational side, managing users,
 jobs, clips, revenue, and an audit trail of what admins have done.

@@ -1,4 +1,4 @@
-# ClipCast — 05 — Uploads & the processing queue
+# ClipCast 05: Uploads & the processing queue
 
 Two ways to submit a job, one queue that handles both.
 
@@ -6,11 +6,11 @@ Two ways to submit a job, one queue that handles both.
 
 1. Client asks `generateUploadUrl()` (`src/actions/s3.ts`) for a place to put
    the file. This action: validates the file server-side
-   (`validateUploadFile()` in `src/server/usage.ts` — extension, content type,
+   (`validateUploadFile()` in `src/server/usage.ts`: extension, content type,
    500MB max, from `src/lib/limits.ts`), checks usage limits
-   (`checkUsageLimits()` — see below), creates an `UploadedFile` row
+   (`checkUsageLimits()`, see below), creates an `UploadedFile` row
    (`uploaded: false`), and returns a **presigned S3 PUT URL** (10 min expiry).
-2. The browser uploads the file straight to S3 using that URL — the file never
+2. The browser uploads the file straight to S3 using that URL; the file never
    passes through the Next.js server.
 3. Once the browser confirms the upload, `processVideo()`
    (`src/actions/generation.ts`) marks the row `uploaded: true` and sends the
@@ -20,19 +20,19 @@ Two ways to submit a job, one queue that handles both.
 
 `processYoutubeVideo()` (`src/actions/generation.ts`) validates the URL shape,
 re-checks usage limits, creates the `UploadedFile` row directly (no S3
-presign needed — Modal's downloader will write the source itself), and sends
+presign needed; Modal's downloader will write the source itself), and sends
 the same Inngest event with a `youtubeUrl` instead of relying on a pre-uploaded
 S3 key.
 
 ## Server-side usage limits
 
 `checkUsageLimits()` / `getUsageStats()` (`src/server/usage.ts`), constants in
-`src/lib/limits.ts` — enforced here, *not* just mirrored client-side for UX:
+`src/lib/limits.ts`, enforced here, *not* just mirrored client-side for UX:
 
-- `MAX_UPLOADS_PER_DAY` (10) — counts `UploadedFile` rows created in the last
+- `MAX_UPLOADS_PER_DAY` (10): counts `UploadedFile` rows created in the last
   rolling 24h.
-- `MAX_ACTIVE_JOBS` (2) — counts rows currently `queued`/`processing`.
-- `MIN_CREDITS_TO_SUBMIT` (1) — credits must be positive to start any job.
+- `MAX_ACTIVE_JOBS` (2): counts rows currently `queued`/`processing`.
+- `MIN_CREDITS_TO_SUBMIT` (1): credits must be positive to start any job.
 
 ## The Inngest function: `processVideoFn`
 
@@ -41,30 +41,30 @@ choices, each mapping to a `step.run()`/`step.fetch()` call so Inngest can
 replay individual steps safely on retry rather than re-running the whole
 function:
 
-- **`concurrency: { limit: 1, key: "event.data.userId" }`** — one active job
+- **`concurrency: { limit: 1, key: "event.data.userId" }`**: one active job
   per user at a time (aligned with `MAX_ACTIVE_JOBS` at the DB layer).
-- **`cancelOn`** — listens for a `"cancel-job-events"` event matching the same
+- **`cancelOn`**: listens for a `"cancel-job-events"` event matching the same
   `uploadedFileId`, so the `/api/cancel-job` route can stop an in-flight run.
-- **`onFailure`** — if the whole function throws/exhausts retries, the
+- **`onFailure`**: if the whole function throws/exhausts retries, the
   `UploadedFile` is marked `failed` so it never sits in `processing` forever.
-- **Credit gate** (`check-credits`, `get-video-duration` steps) — direct
+- **Credit gate** (`check-credits`, `get-video-duration` steps): direct
   uploads use a stored/estimated duration to gate up front; YouTube jobs don't
   know their duration until Modal downloads the file, so they only require
   a minimum of 1 credit up front, then true-up after the fact (see below).
-- **YouTube download phase** — `postCloudDownloader()` (bottom of
+- **YouTube download phase**: `postCloudDownloader()` (bottom of
   `functions.ts`) submits to the downloader Modal endpoint, which returns
   immediately with a `call_id`; the function then polls Modal's async result
   endpoint in a loop of individual `step.run()` calls (**not** a `setTimeout`
-  inside one step — Inngest has no in-step sleep primitive, so each poll is
+  inside one step; Inngest has no in-step sleep primitive, so each poll is
   its own replayable step).
-- **GPU processing call** — `step.fetch()` (not plain `fetch()`) posts to the
+- **GPU processing call**: `step.fetch()` (not plain `fetch()`) posts to the
   processor's `process_video` endpoint. `step.fetch` is Inngest's own
   primitive specifically because it tolerates the multi-minute processing time
   without hitting a serverless function's execution timeout.
 - **After Modal responds**: `update-exact-duration` (true-up the real duration
   now that it's known), `create-clips-in-db` (one `Clip` row per rendered
   output), `deduct-credits` (charge `ceil(duration / 60)` credits, minimum 1),
-  then `set-status-processed` — or `set-status-no-credits` if the true-up
+  then `set-status-processed`, or `set-status-no-credits` if the true-up
   reveals the user can't actually afford the job.
 
 ## Live status in the UI
@@ -72,13 +72,13 @@ function:
 `/api/queue-status` polls current job state for the dashboard's queue table
 (`src/components/dashboard/queue-table.tsx`), which self-adjusts its polling
 interval: 10s while a job is young, 30s once it's been processing a while (GPU
-rendering is slow — no need to hammer the DB).
+rendering is slow, no need to hammer the DB).
 
-## The daily YouTube auto-clip cron — partially built
+## The daily YouTube auto-clip cron: partially built
 
 `dailyClipScheduler` (`src/inngest/functions.ts`, `cron: "0 9 * * *"`) finds
 every user with a connected YouTube channel and non-zero credits. **As of this
-writing it only logs those users** — it does not yet call the YouTube Data API
+writing it only logs those users** and does not yet call the YouTube Data API
 for their latest video or fire a processing event (see the `NOTE`/`Future`
 comments in that function). The channel-connect OAuth plumbing
 (`src/actions/youtube.ts`, `/dashboard/youtube` UI) is complete; wiring this
@@ -86,7 +86,7 @@ cron up to actually submit a job is the remaining piece.
 
 ## How to build it from scratch
 
-**Step 1 — the presigned upload action** (`src/actions/s3.ts`):
+**Step 1: the presigned upload action** (`src/actions/s3.ts`):
 
 ```ts
 "use server";
@@ -94,7 +94,7 @@ export async function generateUploadUrl(fileInfo: { filename: string; contentTyp
   const session = await auth();
   if (!session?.user?.id) return { success: false, error: "Your session has expired. Please log in again." };
 
-  const fileError = validateUploadFile(fileInfo);   // extension/type/size — never trust the client
+  const fileError = validateUploadFile(fileInfo);   // extension/type/size, never trust the client
   if (fileError) return { success: false, error: fileError };
 
   const limitError = await checkUsageLimits(session.user.id);
@@ -114,10 +114,10 @@ export async function generateUploadUrl(fileInfo: { filename: string; contentTyp
 }
 ```
 
-The browser then does a plain `PUT` of the file bytes to `signedUrl` — the
+The browser then does a plain `PUT` of the file bytes to `signedUrl`; the
 Next.js server is never in that data path.
 
-**Step 2 — usage limits, the single source of truth** (`src/lib/limits.ts` +
+**Step 2: usage limits, the single source of truth** (`src/lib/limits.ts` +
 `src/server/usage.ts`):
 
 ```ts
@@ -157,10 +157,10 @@ export async function checkUsageLimits(userId: string): Promise<string | null> {
 
 Both submission actions (`processVideo`, `processYoutubeVideo` in
 `src/actions/generation.ts`) call `checkUsageLimits()` before doing anything
-else — the client-side disabled state on the uploader button is UX only, this
+else. The client-side disabled state on the uploader button is UX only; this
 is the real gate.
 
-**Step 3 — the Inngest function skeleton** (`src/inngest/functions.ts`).
+**Step 3: the Inngest function skeleton** (`src/inngest/functions.ts`).
 The shape that makes retries and cancellation safe:
 
 ```ts
@@ -225,12 +225,12 @@ export const processVideoFn = inngest.createFunction(
 );
 ```
 
-(The real file also handles the "true-up reveals insufficient credits" branch
-— setting `status: "no credits"` instead of deducting a negative balance —
+(The real file also handles the "true-up reveals insufficient credits" branch,
+setting `status: "no credits"` instead of deducting a negative balance,
 and the YouTube polling loop in full; this is the shape to build from, not a
 literal copy-paste.)
 
-**Step 4 — live status polling.** `/api/queue-status/route.ts` is a plain
+**Step 4: live status polling.** `/api/queue-status/route.ts` is a plain
 route handler (not a server action, since the client polls it on an interval
 rather than calling it in response to a user action) that re-queries
 `getUsageStats`-adjacent data and returns fresh `UploadedFile` rows for the
@@ -243,5 +243,5 @@ traces one job through every hop described above, numbered in order.
 
 ## Next
 
-[06-video-processing-pipeline.md](06-video-processing-pipeline.md) — what
+[06-video-processing-pipeline.md](06-video-processing-pipeline.md): what
 happens once Modal receives the call.

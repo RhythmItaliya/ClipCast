@@ -1,4 +1,4 @@
-# ClipCast — 03 — Authentication & roles
+# ClipCast 03: Authentication & roles
 
 `clipcast-frontend/src/server/auth/config.ts` (config) +
 `src/server/auth/index.ts` (exports `auth()`, wired into
@@ -8,20 +8,20 @@
 
 Three, registered in `authConfig.providers`:
 
-1. **Credentials** — email + password. `authorize()` looks the user up by
+1. **Credentials**: email + password. `authorize()` looks the user up by
    email, compares the password with `comparePasswords()`
    (`src/lib/auth.ts`, bcrypt), and rejects if `user.banned` is true. Signup
    (`signUp()` in `src/actions/auth.ts`) hashes the password with
    `hashPassword()` before creating the `User` row.
-2. **Discord** — always registered.
-3. **Google** — conditionally registered, only when both `GOOGLE_CLIENT_ID`
+2. **Discord**: always registered.
+3. **Google**: conditionally registered, only when both `GOOGLE_CLIENT_ID`
    and `GOOGLE_CLIENT_SECRET` are set, so a missing OAuth app never crashes
    auth setup in an environment that doesn't need it. This is the *same*
    Google OAuth client used for the YouTube channel-connect feature
    (`src/actions/youtube.ts`), though that flow does its own separate
    authorization-code exchange rather than going through NextAuth's session.
 
-`allowDangerousEmailAccountLinking: true` on both OAuth providers — a user who
+`allowDangerousEmailAccountLinking: true` on both OAuth providers: a user who
 signed up with email/password and later clicks "Sign in with Google" using the
 same email address gets linked to the same account rather than blocked.
 
@@ -29,12 +29,12 @@ same email address gets linked to the same account rather than blocked.
 
 `session: { strategy: "jwt" }`. Two callbacks make this work with roles:
 
-- **`jwt({ token, user })`** — on sign-in only (`user` is only present then),
+- **`jwt({ token, user })`**: on sign-in only (`user` is only present then),
   re-fetches the user's `role` from the DB and stamps it (plus `id`) onto the
   token. This means a role change takes effect on the user's *next* sign-in,
-  not instantly — the admin panel's `setUserRole()` action correctly returns a
+  not instantly; the admin panel's `setUserRole()` action correctly returns a
   cache-revalidation, not a session-forcing one.
-- **`session({ session, token })`** — copies `id`/`role` from the token onto
+- **`session({ session, token })`**: copies `id`/`role` from the token onto
   `session.user`, and the module augments NextAuth's `Session`/`JWT` types
   (`declare module "next-auth"` / `"@auth/core/jwt"`) so `session.user.role`
   and `session.user.id` are typed everywhere without casts.
@@ -43,18 +43,18 @@ same email address gets linked to the same account rather than blocked.
 
 Two independent layers, deliberately redundant:
 
-1. **Route layout guards** — every `/admin/*` page is under
+1. **Route layout guards**: every `/admin/*` page is under
    `src/app/admin/layout.tsx`, which calls `auth()` and:
    - redirects to `/login` if there's no session,
-   - **redirects to `/dashboard` (not a 403) if `role !== "ADMIN"`** — regular
+   - **redirects to `/dashboard` (not a 403) if `role !== "ADMIN"`**, regular
      users never see evidence that `/admin` exists.
    `src/app/dashboard/layout.tsx` does the equivalent "must be signed in"
    check for the regular app.
-2. **Per-action guards** — every mutating/reading function in
+2. **Per-action guards**: every mutating/reading function in
    `src/actions/admin.ts` calls a `requireAdmin()` helper that independently
    re-checks the session and role, throwing if the caller isn't an admin. This
    means the check holds even if a server action were ever called from
-   somewhere other than an `/admin` page — the UI guard is not the only line
+   somewhere other than an `/admin` page; the UI guard is not the only line
    of defense.
 
 `requireAdmin()` returns `{ id, email }` (not just the id) specifically so
@@ -63,14 +63,14 @@ mutations can attribute an `AdminAuditLog` entry (see
 
 ## How to build it from scratch
 
-**Step 1 — install.**
+**Step 1: install.**
 
 ```bash
 npm install next-auth@beta @auth/prisma-adapter bcryptjs
 npx auth secret   # generates AUTH_SECRET
 ```
 
-**Step 2 — password hashing helpers** (`src/lib/auth.ts` — the entire file):
+**Step 2: password hashing helpers** (`src/lib/auth.ts`, the entire file):
 
 ```ts
 import { hash, compare } from "bcryptjs";
@@ -84,7 +84,7 @@ export async function comparePasswords(plainPassword: string, hashedPassword: st
 }
 ```
 
-**Step 3 — the config**, `src/server/auth/config.ts`. First, augment
+**Step 3: the config**, `src/server/auth/config.ts`. First, augment
 NextAuth's types so `role`/`id` are typed everywhere without a cast:
 
 ```ts
@@ -105,7 +105,7 @@ export const authConfig = {
   trustHost: true, // required for `next start` on self-hosted/localhost
   pages: { signIn: "/login" },
   providers: [
-    // Only registered when both are set — a missing OAuth app config never
+    // Only registered when both are set; a missing OAuth app config never
     // crashes auth setup in an environment that doesn't need it.
     ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
       ? [GoogleProvider({
@@ -156,25 +156,25 @@ export const authConfig = {
 } satisfies NextAuthConfig;
 ```
 
-**Step 4 — wire up the route + `auth()` helper.** `src/server/auth/index.ts`
+**Step 4: wire up the route + `auth()` helper.** `src/server/auth/index.ts`
 exports `auth`, `handlers`, `signIn`, `signOut` from `NextAuth(authConfig)`,
 and `src/app/api/auth/[...nextauth]/route.ts` just re-exports
 `{ GET, POST } = handlers`. Anywhere else in the app (server components,
 server actions), `await auth()` gets the typed session.
 
-**Step 5 — the two RBAC layers.** First, the layout guard —
+**Step 5: the two RBAC layers.** First, the layout guard,
 `src/app/admin/layout.tsx`:
 
 ```tsx
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  if (session.user.role !== "ADMIN") redirect("/dashboard"); // not a 403 — regular users never learn /admin exists
+  if (session.user.role !== "ADMIN") redirect("/dashboard"); // not a 403, regular users never learn /admin exists
   // ...fetch fresh user, render <AdminShell>
 }
 ```
 
-Second, the per-action guard — every function in `src/actions/admin.ts`
+Second, the per-action guard: every function in `src/actions/admin.ts`
 starts with this (real code):
 
 ```ts
@@ -199,5 +199,5 @@ second query to look up the admin's email.
 
 ## Next
 
-[04-frontend-app-structure.md](04-frontend-app-structure.md) — how the rest of
+[04-frontend-app-structure.md](04-frontend-app-structure.md): how the rest of
 the app is organized around this.
