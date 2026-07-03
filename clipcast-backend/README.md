@@ -50,11 +50,17 @@ Each service can also be deployed from its own directory:
 ./clipcast-backend/apps/downloader/deploy.sh
 ```
 
-Before the first deployment, copy the required values from the root `.env` to
-the shared Modal secret:
+Before the first deployment, set up a local virtualenv with the helper-script
+dependencies, then copy the required values from the root `.env` to the
+shared Modal secret:
 
 ```bash
-./clipcast-backend/.venv/bin/python clipcast-backend/scripts/setup_modal_secret.py
+python -m venv clipcast-backend/.venv
+source clipcast-backend/.venv/bin/activate
+pip install -r clipcast-backend/requirements.txt
+modal token new    # one-time Modal CLI login
+
+python clipcast-backend/scripts/setup_modal_secret.py
 ```
 
 Required secret values are `GEMINI_API_KEY`, `PROCESS_VIDEO_ENDPOINT_AUTH`,
@@ -82,7 +88,7 @@ endpoints: YouTube URL → CPU downloader → S3 → GPU processor → S3 clips.
 ```bash
 # Activate a Python virtualenv that has the dependencies:
 source clipcast-backend/venv/bin/activate     # or .venv/bin/activate
-pip install requests boto3 python-dotenv      # if not already installed
+pip install -r clipcast-backend/requirements.txt
 ```
 
 The script reads credentials from the repo root `.env` automatically.

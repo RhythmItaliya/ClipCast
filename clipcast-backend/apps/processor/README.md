@@ -29,21 +29,30 @@ without hitting a serverless function timeout).
 3. **Transcribe** — `transcribe_video()` runs **WhisperX** (`large-v2`, loaded
    once per container in `load_model()` via `@modal.enter()`, kept resident
    across requests) plus forced alignment, returning word-level timestamps.
-4. **Pick moments** — `identify_moments()` sends the transcript to
-   **Gemini 2.5 Flash** using the prompt for the requested `clip_mode` (see
+4. **Pick moments + an AI title** — `identify_moments()` sends the transcript
+   to **Gemini 2.5 Flash** using the prompt for the requested `clip_mode` (see
    `CLIP_MODE_PROMPTS` — one prompt per mode, each asking for
-   `[{"start": seconds, "end": seconds}, ...]` on exact transcript sentence
-   boundaries), then repairs/validates the JSON Gemini returns.
-5. **Render each moment**, one of two paths:
+   `[{"start": seconds, "end": seconds, "title": "..."}, ...]` on exact
+   transcript sentence boundaries, plus a short punchy title per clip — same
+   call, no extra API cost), then repairs/validates the JSON Gemini returns.
+5. **Render each moment**, one of two paths, both ending with a thumbnail grab:
    - **Preview mode** (`create_preview_clip()`) — fast: a straight crop/scale
      to 480p, no active-speaker detection, no subtitles.
    - **Full mode** (`process_clip()`) — runs **TalkNet** active-speaker
      detection (`asd/demoTalkNet.py`, `asd/talkNet.py`, `asd/model/`) to find
      and track whoever is talking, then `create_vertical_video()` crops/pans
      the frame to follow them in 9:16, then `create_subtitles_with_ffmpeg()`
-     burns in word-by-word captions from the WhisperX segments.
-6. **Upload** — each rendered clip is pushed back to S3 under the source's key
-   prefix; temporary container files are cleaned up (`temporary_workdir()`).
+     burns in **karaoke-style word-highlighted** captions (the currently-spoken
+     word turns ClipCast brand indigo, no drop shadow/black box behind the
+     text) plus a small semi-transparent `ClipCast` watermark.
+   - Both paths call `create_thumbnail()` afterward — one ffmpeg frame grab
+     from the *final* rendered video (captions/watermark included), ~15% into
+     the clip.
+6. **Upload** — each rendered clip *and* its thumbnail JPEG are pushed back to
+   S3 under the source's key prefix; temporary container files are cleaned up
+   (`temporary_workdir()`). The endpoint returns a structured
+   `{s3_key, thumbnail_s3_key, title, duration}` record per clip (not just
+   aggregate counts) so the frontend can create `Clip` rows directly.
 
 ## The `ClipCast` class
 
@@ -57,7 +66,8 @@ download/load cost.
 |---|---|
 | `load_model()` (`@modal.enter`) | Runs once per container: loads WhisperX + alignment models onto the GPU, patches a `faster_whisper` compatibility issue, creates the Gemini client |
 | `transcribe_video()` (`@modal.method`) | ffmpeg → WhisperX → word-level segments |
-| `identify_moments()` (`@modal.method`) | Transcript → Gemini → validated list of `{start, end}` moments |
+| `identify_moments()` (`@modal.method`) | Transcript → Gemini → validated list of `{start, end, title}` moments |
+| `create_thumbnail()` | ffmpeg single-frame grab from the final rendered clip |
 | `process_video()` (`@modal.fastapi_endpoint`) | The public endpoint — orchestrates steps 1–6 above, translates failures into meaningful HTTP status codes (`404` missing S3 source, `422` corrupt/unreadable video, `502`/`503` upstream failures) |
 
 ## Deploy
