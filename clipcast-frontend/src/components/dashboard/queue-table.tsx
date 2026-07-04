@@ -82,6 +82,12 @@ export function QueueTable({
   const [files, setFiles] = useState<QueueFile[]>(initialFiles);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Which specific button triggered the in-flight request, so only that one
+  // shows a spinner — the row's other action button just disables instead of
+  // spinning too.
+  const [busyAction, setBusyAction] = useState<
+    "retry" | "cancel" | "clear" | null
+  >(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -159,6 +165,7 @@ export function QueueTable({
       return;
     }
     setBusyId(fileId);
+    setBusyAction("retry");
     try {
       const res = await fetchWithTimeout("/api/reset-stuck-jobs", {
         method: "POST",
@@ -181,6 +188,7 @@ export function QueueTable({
       toast.error("Retry failed", { description: getFriendlyErrorMessage(e) });
     } finally {
       setBusyId(null);
+      setBusyAction(null);
     }
   };
 
@@ -190,6 +198,7 @@ export function QueueTable({
       return;
     }
     setBusyId(fileId);
+    setBusyAction("cancel");
     try {
       const res = await fetchWithTimeout("/api/cancel-job", {
         method: "POST",
@@ -217,11 +226,13 @@ export function QueueTable({
       toast.error("Cancel failed", { description: getFriendlyErrorMessage(e) });
     } finally {
       setBusyId(null);
+      setBusyAction(null);
     }
   };
 
   const handleClear = async (fileId: string) => {
     setBusyId(fileId);
+    setBusyAction("clear");
     try {
       const res = await clearQueueItem(fileId);
       if (res.success) {
@@ -236,6 +247,7 @@ export function QueueTable({
       });
     } finally {
       setBusyId(null);
+      setBusyAction(null);
     }
   };
 
@@ -302,6 +314,7 @@ export function QueueTable({
                     key={item.id}
                     item={item}
                     busy={busyId === item.id}
+                    busyAction={busyId === item.id ? busyAction : null}
                     onRetry={handleRetry}
                     onCancel={handleCancel}
                     onClear={handleClear}
@@ -319,12 +332,14 @@ export function QueueTable({
 function QueueRow({
   item,
   busy,
+  busyAction,
   onRetry,
   onCancel,
   onClear,
 }: {
   item: QueueFile;
   busy: boolean;
+  busyAction: "retry" | "cancel" | "clear" | null;
   onRetry: (id: string) => void;
   onCancel: (id: string) => void;
   onClear: (id: string) => void;
@@ -424,7 +439,7 @@ function QueueRow({
               title="Retry job"
               className="text-muted-foreground hover:bg-surface-2 hover:text-foreground grid size-8 place-items-center rounded-lg disabled:opacity-50"
             >
-              {busy ? (
+              {busyAction === "retry" ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
                 <RotateCcw className="size-4" />
@@ -438,7 +453,7 @@ function QueueRow({
               title="Cancel job"
               className="text-muted-foreground hover:bg-surface-2 hover:text-destructive grid size-8 place-items-center rounded-lg disabled:opacity-50"
             >
-              {busy ? (
+              {busyAction === "cancel" ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
                 <X className="size-4" />
@@ -451,7 +466,7 @@ function QueueRow({
               title="Clear from queue"
               className="text-muted-foreground hover:bg-surface-2 hover:text-destructive grid size-8 place-items-center rounded-lg disabled:opacity-50"
             >
-              {busy ? (
+              {busyAction === "clear" ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
                 <Trash2 className="size-4" />

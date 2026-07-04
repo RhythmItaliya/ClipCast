@@ -21,6 +21,7 @@ type AdminJob = {
   clipMode: string | null;
   isPreview: boolean | null;
   errorMessage: string | null;
+  internalErrorDetail: string | null;
   processingSummary: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -199,14 +200,16 @@ export function JobsTable({
                         {statusMeta.icon}
                         {statusMeta.label}
                       </span>
-                      {job.errorMessage && (
+                      {(job.internalErrorDetail ?? job.errorMessage) && (
                         <div
-                          title={job.errorMessage}
+                          title={job.internalErrorDetail ?? job.errorMessage ?? undefined}
                           className="text-destructive mt-0.5 flex items-center gap-1 text-[10px]"
                         >
                           <AlertTriangle className="size-2.5" />
-                          <span className="max-w-[120px] truncate">
-                            {job.errorMessage}
+                          <span className="max-w-[160px] truncate">
+                            {/* Admins see the raw technical detail, not the
+                                friendly text shown to the job's own user. */}
+                            {job.internalErrorDetail ?? job.errorMessage}
                           </span>
                         </div>
                       )}
