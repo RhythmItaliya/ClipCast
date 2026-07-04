@@ -38,10 +38,12 @@ transformers==4.39.3
 accelerate>=0.25.0
 datasets>=2.16.0
 
-# ── vllm — HF fallback LLM (Qwen2.5-72B-Instruct-AWQ) ─────────────────────────
-# vllm is installed via run_commands in the image build (needs --extra-index-url
-# for the correct CUDA wheel). Listed here for audit purposes only.
-# vllm==0.4.3  ← installed in image definition, not here
+# ── HF fallback LLM (Qwen2.5-7B-Instruct, used only if Gemini fails) ──────────
+# Loaded plain (bf16) through the transformers pin already required by
+# WhisperX below, no extra package needed: transformers==4.39.3 already ships
+# Qwen2ForCausalLM support (added 4.37), and autoawq/vllm would each demand
+# their own newer torch/transformers pins that fight WhisperX's in this same
+# image.
 huggingface-hub>=0.22.0
 
 # ── Utility ────────────────────────────────────────────────────────────────────

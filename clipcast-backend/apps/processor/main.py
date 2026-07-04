@@ -29,6 +29,7 @@ import numpy as np
 from pydantic import BaseModel
 import os
 from google import genai
+from google.genai import types as genai_types
 
 import pysubs2
 from tqdm import tqdm
@@ -541,6 +542,104 @@ def process_clip(base_dir, original_video_path, s3_key, start_time, end_time, cl
     }
 
 
+# Gemini's window is large enough to swallow even a multi-hour transcript in
+# one call, but WhisperX's raw word-level output (one JSON object per single
+# word) is a wasteful, awkward representation for that: a 4-hour podcast is
+# tens of thousands of word entries, most of the token budget goes to
+# repeated "start"/"end"/"word" keys, and the model has to reconstruct
+# sentences itself before it can find the "sentence boundaries" the prompt
+# asks for. Grouping into sentences first is both far more compact and a
+# better match for what the prompt actually needs.
+def _build_sentence_transcript(word_segments, max_words_per_sentence=50):
+    sentences = []
+    current_words = []
+    current_start = None
+    last_end = None
+    for w in word_segments:
+        word = (w.get("word") or "").strip()
+        if not word:
+            continue
+        if current_start is None:
+            current_start = w["start"]
+        current_words.append(word)
+        last_end = w["end"]
+        ends_sentence = word[-1:] in ".?!" or len(current_words) >= max_words_per_sentence
+        if ends_sentence:
+            sentences.append({
+                "start": round(current_start, 2),
+                "end": round(last_end, 2),
+                "text": " ".join(current_words),
+            })
+            current_words = []
+            current_start = None
+    if current_words and current_start is not None:
+        sentences.append({
+            "start": round(current_start, 2),
+            "end": round(last_end, 2),
+            "text": " ".join(current_words),
+        })
+    return sentences
+
+
+# Fallback LLM used only when Gemini errors or returns unparsable output for
+# a chunk. A 7B instruct model is a deliberate choice over a much larger one
+# (the repo's old comments floated Qwen2.5-72B via vllm, but that was never
+# actually implemented): 72B needs 40GB+ of VRAM on its own, which leaves
+# almost no headroom next to the resident WhisperX model on the same L40S
+# (48GB total). 7B is more than capable of the actual task here (extracting
+# a bounded JSON list from a 20-minute transcript window).
+#
+# Loaded plain in bf16, not AWQ-quantized: autoawq needs transformers>=4.45
+# and torch>=2.4, both newer than the transformers==4.39.3 / torch==2.2.2
+# already pinned for WhisperX in this image, so quantizing here would force
+# a version bump that risks breaking the transcription pipeline. bf16 costs
+# more VRAM (~15GB vs ~5GB for 4-bit) but that's still comfortable headroom
+# on a 48GB card, and transformers==4.39.3 already ships Qwen2ForCausalLM
+# (added in 4.37), so no extra package is needed at all.
+HF_FALLBACK_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
+
+
+def _generate_with_hf(model, tokenizer, prompt_text: str) -> str:
+    import torch
+    messages = [{"role": "user", "content": prompt_text}]
+    chat_text = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+    inputs = tokenizer(chat_text, return_tensors="pt").to(model.device)
+    with torch.inference_mode():
+        output_ids = model.generate(
+            **inputs, max_new_tokens=4096, do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+    generated = output_ids[0][inputs["input_ids"].shape[1]:]
+    return tokenizer.decode(generated, skip_special_tokens=True)
+
+
+# Windows the sentence transcript into fixed-length time chunks so a single
+# Gemini call always covers a bounded amount of source video, no matter how
+# long the overall video is. A 20-30 min podcast is one chunk (one call,
+# same behavior as before); a 4-hour podcast becomes ~12 chunks, each small
+# enough to avoid truncated or malformed JSON output.
+CHUNK_TARGET_SECONDS = 20 * 60
+
+
+def _chunk_sentences(sentences, chunk_seconds=CHUNK_TARGET_SECONDS):
+    if not sentences:
+        return []
+    chunks = []
+    current = []
+    chunk_start = sentences[0]["start"]
+    for s in sentences:
+        current.append(s)
+        if s["end"] - chunk_start >= chunk_seconds:
+            chunks.append(current)
+            current = []
+            chunk_start = s["end"]
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 @app.cls(
     # L40S is Modal's recommended inference GPU and has enough VRAM to keep
     # WhisperX plus the alignment model resident. CPU, RAM, and scratch disk
@@ -615,11 +714,41 @@ class ClipCast:
         self.gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         print("Created gemini client...")
 
+    def _get_hf_fallback(self):
+        """Lazily load the HF fallback model on first use only.
+
+        Gemini succeeds for the overwhelming majority of chunks, so eagerly
+        loading a second resident model in @modal.enter() would pay a real
+        VRAM and cold-start cost on every single request for a path that
+        rarely runs. Loading it the first time a chunk actually needs it
+        keeps the common case fast and only pays for the fallback when it's
+        used.
+        """
+        if getattr(self, "_hf_model", None) is None:
+            print(f"Loading HF fallback model ({HF_FALLBACK_MODEL_ID})...")
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            self._hf_tokenizer = AutoTokenizer.from_pretrained(HF_FALLBACK_MODEL_ID)
+            self._hf_model = AutoModelForCausalLM.from_pretrained(
+                HF_FALLBACK_MODEL_ID, device_map="cuda", torch_dtype=torch.bfloat16,
+            )
+            hf_volume.commit()
+            print("HF fallback model loaded.")
+        return self._hf_model, self._hf_tokenizer
+
     @modal.method()
     def identify_moments(self, transcript, clip_mode="qa"):
-        """Select clip moments from the transcript using Gemini 2.5 Flash."""
+        """Select clip moments from the transcript using Gemini 2.5 Flash,
+        falling back to a resident Hugging Face model for any chunk where
+        Gemini errors or returns unparsable output.
+
+        The transcript is windowed into bounded time chunks (see
+        `_chunk_sentences`) so this scales to a 4-hour source the same way it
+        handles a 20-minute one: each call stays small and fast instead of
+        one call whose input and required output both grow with the video's
+        length.
+        """
         prompt = CLIP_MODE_PROMPTS.get(clip_mode, CLIP_MODE_PROMPTS["qa"])
-        full_prompt = prompt + str(transcript)
 
         def _clean_and_validate(raw: str | None) -> list | None:
             """Strip code fences, parse JSON, return list or None on failure."""
@@ -644,22 +773,92 @@ class ClipCast:
             except json.JSONDecodeError:
                 return None
 
-        try:
-            response = self.gemini_client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=full_prompt,
-            )
-            gemini_raw = response.text
-            print(f"Gemini response (first 200 chars): {(gemini_raw or '')[:200]!r}")
-            moments = _clean_and_validate(gemini_raw)
-            if moments is not None:
-                print(f"Gemini identified {len(moments)} moment(s)")
-                return json.dumps(moments)
-            print(f"Gemini returned non-JSON: {(gemini_raw or '')[:300]!r}")
-            return json.dumps([])
-        except Exception as err:
-            print(f"Gemini failed: {err}")
-            return json.dumps([])
+        sentences = _build_sentence_transcript(transcript)
+        if not sentences:
+            return json.dumps({
+                "moments": [],
+                "moment_selection_summary": {
+                    "total_chunks": 0, "gemini_chunks": 0,
+                    "huggingface_chunks": 0, "failed_chunks": 0,
+                },
+            })
+
+        chunks = _chunk_sentences(sentences)
+
+        # thinking_budget=0 turns off Gemini 2.5's extended-reasoning tokens:
+        # for a long transcript those reasoning tokens were eating into the
+        # fixed output-token budget, sometimes leaving no room for the actual
+        # JSON and producing a truncated, unparsable response. max_output_tokens
+        # is set explicitly so a chunk full of candidate moments never gets
+        # cut off mid-JSON either.
+        config = genai_types.GenerateContentConfig(
+            max_output_tokens=8192,
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+        )
+
+        all_moments: list = []
+        # One entry per chunk: "gemini", "huggingface", or "none" (both failed).
+        # This is what lets a job report which model actually produced its
+        # clips, instead of that being invisible once Gemini and the fallback
+        # are both in play.
+        chunk_sources: list[str] = []
+
+        for chunk_index, chunk in enumerate(chunks):
+            chunk_prompt = prompt + json.dumps(chunk)
+            moments = None
+            source = "none"
+
+            try:
+                response = self.gemini_client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=chunk_prompt,
+                    config=config,
+                )
+                gemini_raw = response.text
+                print(
+                    f"Gemini chunk {chunk_index + 1}/{len(chunks)} response "
+                    f"(first 200 chars): {(gemini_raw or '')[:200]!r}"
+                )
+                moments = _clean_and_validate(gemini_raw)
+                if moments is not None:
+                    source = "gemini"
+                elif gemini_raw:
+                    print(f"Gemini chunk {chunk_index + 1} returned non-JSON: {gemini_raw[:300]!r}")
+            except Exception as err:
+                print(f"Gemini failed on chunk {chunk_index + 1}/{len(chunks)}: {err}")
+
+            if moments is None:
+                try:
+                    hf_model, hf_tokenizer = self._get_hf_fallback()
+                    hf_raw = _generate_with_hf(hf_model, hf_tokenizer, chunk_prompt)
+                    print(
+                        f"HF fallback chunk {chunk_index + 1}/{len(chunks)} response "
+                        f"(first 200 chars): {(hf_raw or '')[:200]!r}"
+                    )
+                    moments = _clean_and_validate(hf_raw)
+                    if moments is not None:
+                        source = "huggingface"
+                    elif hf_raw:
+                        print(f"HF fallback chunk {chunk_index + 1} returned non-JSON: {hf_raw[:300]!r}")
+                except Exception as err:
+                    print(f"HF fallback failed on chunk {chunk_index + 1}/{len(chunks)}: {err}")
+
+            if moments:
+                all_moments.extend(moments)
+            chunk_sources.append(source)
+
+        summary = {
+            "total_chunks": len(chunks),
+            "gemini_chunks": chunk_sources.count("gemini"),
+            "huggingface_chunks": chunk_sources.count("huggingface"),
+            "failed_chunks": chunk_sources.count("none"),
+        }
+        print(
+            f"Moment selection: {summary['gemini_chunks']}/{summary['total_chunks']} chunk(s) via Gemini, "
+            f"{summary['huggingface_chunks']} via HF fallback, {summary['failed_chunks']} failed "
+            f"({len(all_moments)} moment(s) total)"
+        )
+        return json.dumps({"moments": all_moments, "moment_selection_summary": summary})
 
     @modal.method()
     def transcribe_video(self, base_dir, video_path):
@@ -793,20 +992,27 @@ class ClipCast:
         if not transcript_segments:
             print("Warning: transcript is empty — no speech detected in video")
 
-        # ── Moment identification (Gemini → HF fallback) ─────────────────────
-        # identify_moments handles all errors internally. It returns a JSON
-        # string (always valid) — Gemini first, then Qwen2.5-72B-AWQ if Gemini
-        # fails. It never raises; failure returns json.dumps([]).
+        # ── Moment identification (Gemini, HF fallback, windowed by chunk) ───
+        # identify_moments handles all errors internally, per chunk, and
+        # always returns a valid JSON string. It never raises; a chunk that
+        # fails on both Gemini and the HF fallback is skipped rather than
+        # failing the job.
         print(f"Identifying clip moments (mode={request.clip_mode})")
         identified_moments_raw = self.identify_moments.local(
             transcript_segments, clip_mode=request.clip_mode
         )
 
         # Parse the returned JSON string (always valid — guaranteed by identify_moments)
+        moment_selection_summary = {}
         try:
-            clip_moments = json.loads(identified_moments_raw) if identified_moments_raw else []
+            parsed_moments = json.loads(identified_moments_raw) if identified_moments_raw else {}
         except json.JSONDecodeError:
             print(f"Unexpected non-JSON from identify_moments: {identified_moments_raw[:200]!r}")
+            parsed_moments = {}
+        if isinstance(parsed_moments, dict):
+            clip_moments = parsed_moments.get("moments", [])
+            moment_selection_summary = parsed_moments.get("moment_selection_summary", {})
+        else:
             clip_moments = []
         if not clip_moments or not isinstance(clip_moments, list):
             print("No valid clip moments identified")
@@ -899,12 +1105,36 @@ class ClipCast:
             for e in clip_errors:
                 print(f"  • {e}")
 
+        # Human-readable record of which model/service actually handled each
+        # stage of this job — surfaced to the frontend and stored per job so
+        # a video's processing history (which model picked its moments, and
+        # whether the HF fallback ever kicked in) is visible, not just an
+        # opaque "processed"/"failed" status.
+        processing_summary_parts = ["WhisperX large-v2 (transcription)"]
+        total_chunks = moment_selection_summary.get("total_chunks", 0)
+        if total_chunks:
+            gem = moment_selection_summary.get("gemini_chunks", 0)
+            hf = moment_selection_summary.get("huggingface_chunks", 0)
+            failed = moment_selection_summary.get("failed_chunks", 0)
+            moment_part = f"Gemini 2.5 Flash {gem}/{total_chunks} chunk(s) (moments)"
+            if hf:
+                moment_part += f", HF fallback {HF_FALLBACK_MODEL_ID} {hf}/{total_chunks}"
+            if failed:
+                moment_part += f", {failed}/{total_chunks} chunk(s) failed"
+            processing_summary_parts.append(moment_part)
+        processing_summary_parts.append(
+            "TalkNet ASD (speaker detection)" if not request.preview_only
+            else "TalkNet ASD skipped (preview mode)"
+        )
+        processing_summary = " · ".join(processing_summary_parts)
+
         return {
             "success": True,
             "duration": duration,
             "clips_found": len(valid_moments),
             "clips_rendered": clips_rendered,
             "clips": clip_records,
+            "processing_summary": processing_summary,
             **({"clip_warnings": clip_errors} if clip_errors else {}),
         }
 
