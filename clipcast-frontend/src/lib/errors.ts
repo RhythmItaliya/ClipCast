@@ -118,27 +118,6 @@ export function messageForStatus(status: number): string {
 }
 
 /**
- * Standard toast.error() helper. Normalizes the title + description pattern
- * used across the app so every error toast is consistent.
- *
- * Usage:
- *   catch (e) { toastError("Couldn't save", e); }
- *   catch (e) { toastError("Upload failed", e); }
- */
-export function toastError(
-  title: string,
-  error?: unknown,
-  toastFn?: (title: string, options?: { description?: string }) => void,
-): { title: string; description: string } {
-  const description = error ? getFriendlyErrorMessage(error) : FRIENDLY_MESSAGES.unknown;
-  // If a toast function is passed, call it directly
-  if (toastFn) {
-    toastFn(title, { description });
-  }
-  return { title, description };
-}
-
-/**
  * fetch() wrapper with a timeout and friendly error translation.
  * Throws Error(friendlyMessage) so callers can `toast.error(err.message)`.
  */

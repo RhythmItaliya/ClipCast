@@ -3,7 +3,6 @@
 import {
   Ban,
   CheckCircle2,
-  ChevronDown,
   CreditCard,
   Eye,
   Loader2,
@@ -315,28 +314,5 @@ function UserRow({ user }: { user: AdminUser }) {
         </div>
       </td>
     </tr>
-  );
-}
-
-// ── Dropdown (unused but exported for potential future use) ───────────────────
-export function RoleDropdown({
-  current,
-  onChange,
-}: {
-  current: "USER" | "ADMIN";
-  onChange: (r: "USER" | "ADMIN") => void;
-}) {
-  return (
-    <div className="relative inline-block">
-      <select
-        value={current}
-        onChange={(e) => onChange(e.target.value as "USER" | "ADMIN")}
-        className="border-border bg-surface appearance-none rounded-md border px-3 py-1 pr-7 text-xs font-medium focus:outline-none"
-      >
-        <option value="USER">USER</option>
-        <option value="ADMIN">ADMIN</option>
-      </select>
-      <ChevronDown className="pointer-events-none absolute top-1/2 right-2 size-3 -translate-y-1/2 opacity-50" />
-    </div>
   );
 }
