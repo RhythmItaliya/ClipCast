@@ -1,10 +1,13 @@
 "use server";
 
+import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { env } from "~/env";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 import { YOUTUBE_TOKEN_REFRESH_THRESHOLD_MS } from "~/lib/utils";
+
+export type PendingYouTubeChannel = { id: string; title: string };
 
 // ── OAuth helpers ────────────────────────────────────────────────────────────
 const SCOPES = [
@@ -48,10 +51,54 @@ export async function disconnectYouTubeChannel(): Promise<void> {
       youtubeAccessToken: null,
       youtubeRefreshToken: null,
       youtubeTokenExpiry: null,
+      youtubePendingChannels: Prisma.JsonNull,
     },
   });
 
   revalidatePath("/dashboard/youtube");
+}
+
+/**
+ * Finalizes the channel a user picked when their Google account had more
+ * than one and the OAuth callback parked them in a "select channel" state
+ * (tokens already saved, candidates in youtubePendingChannels).
+ */
+export async function selectYouTubeChannel(
+  channelId: string,
+): Promise<{ success: boolean; error?: string }> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { success: false, error: "Your session has expired. Please log in again." };
+  }
+
+  const user = await db.user.findUnique({
+    where: { id: session.user.id },
+    select: { youtubePendingChannels: true },
+  });
+
+  const pending = Array.isArray(user?.youtubePendingChannels)
+    ? (user.youtubePendingChannels as unknown as PendingYouTubeChannel[])
+    : [];
+  const picked = pending.find((c) => c.id === channelId);
+
+  if (!picked) {
+    return {
+      success: false,
+      error: "That channel is no longer available. Please reconnect your account.",
+    };
+  }
+
+  await db.user.update({
+    where: { id: session.user.id },
+    data: {
+      youtubeChannelId: picked.id,
+      youtubeChannelName: picked.title,
+      youtubePendingChannels: Prisma.JsonNull,
+    },
+  });
+
+  revalidatePath("/dashboard/youtube");
+  return { success: true };
 }
 
 // ── Refresh token if expired ─────────────────────────────────────────────────

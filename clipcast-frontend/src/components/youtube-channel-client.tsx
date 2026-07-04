@@ -11,6 +11,7 @@ import {
   Scissors,
   Zap,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { processYoutubeVideo } from "~/actions/generation";
@@ -19,6 +20,8 @@ import {
   disconnectYouTubeChannel,
   getChannelVideos,
   getYouTubeAuthUrl,
+  selectYouTubeChannel,
+  type PendingYouTubeChannel,
   type YouTubeVideo,
 } from "~/actions/youtube";
 import { getFriendlyErrorMessage, isOffline, FRIENDLY_MESSAGES } from "~/lib/errors";
@@ -28,17 +31,22 @@ export function YouTubeChannelClient({
   channelName,
   connected,
   oauthError,
+  pendingChannels,
 }: {
   isConnected: boolean;
   channelName: string | null;
   connected: boolean;
   oauthError: string | null;
+  pendingChannels: PendingYouTubeChannel[];
 }) {
+  const router = useRouter();
   const [videos, setVideos] = useState<YouTubeVideo[]>([]);
   const [loadingVideos, setLoadingVideos] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [selectingChannelId, setSelectingChannelId] = useState<string | null>(null);
+  const hasPendingChannels = pendingChannels.length > 0;
 
   useEffect(() => {
     if (connected) toast.success("YouTube channel connected!");
@@ -50,15 +58,49 @@ export function YouTubeChannelClient({
         title = "No Channel Found";
         desc =
           "The Google account you selected does not have a YouTube channel associated with it. Please create a channel first or use a different account.";
+      } else if (oauthError === "api_error") {
+        title = "Couldn't verify your channel";
+        desc =
+          "We reached Google but couldn't confirm your channel just now. This is usually temporary, please try connecting again in a moment.";
       } else if (oauthError === "oauth_failed") {
-        desc = "Failed to securely exchange authentication tokens.";
+        desc = "Failed to securely exchange authentication tokens. Please try connecting again.";
       } else if (oauthError === "access_denied") {
         desc = "You denied access to your YouTube channel.";
       }
 
       toast.error(title, { description: desc });
     }
-  }, [connected, oauthError]);
+    // Strip connected/error/select_channel from the URL once we've shown the
+    // toast for them — otherwise refreshing the page re-reads the same
+    // query params and shows the exact same toast again, every time.
+    if (connected || oauthError) {
+      router.replace("/dashboard/youtube");
+    }
+  }, [connected, oauthError, router]);
+
+  async function handleSelectChannel(channel: PendingYouTubeChannel) {
+    setSelectingChannelId(channel.id);
+    try {
+      const result = await selectYouTubeChannel(channel.id);
+      if (result.success) {
+        toast.success("YouTube channel connected!", {
+          description: channel.title,
+        });
+        router.replace("/dashboard/youtube");
+        router.refresh();
+      } else {
+        toast.error("Could not connect that channel", {
+          description: result.error,
+        });
+      }
+    } catch (e) {
+      toast.error("Could not connect that channel", {
+        description: getFriendlyErrorMessage(e),
+      });
+    } finally {
+      setSelectingChannelId(null);
+    }
+  }
 
   const fetchVideos = useCallback(async () => {
     setLoadingVideos(true);
@@ -168,25 +210,62 @@ export function YouTubeChannelClient({
             {isConnected ? "Connected" : "Not connected"}
           </span>
         </div>
-        <button
-          onClick={isConnected ? handleDisconnect : handleConnect}
-          disabled={connecting || disconnecting}
-          className={`mt-6 flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-60 sm:w-auto ${
-            isConnected
-              ? "border-border bg-surface text-foreground border"
-              : "bg-brand text-brand-foreground"
-          }`}
-        >
-          {connecting || disconnecting ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : isConnected ? (
-            <LogOut className="size-4" />
-          ) : (
-            <YoutubeIcon className="size-4" />
-          )}
-          {isConnected ? "Disconnect Channel" : "Connect YouTube Channel"}
-        </button>
+        {!hasPendingChannels && (
+          <button
+            onClick={isConnected ? handleDisconnect : handleConnect}
+            disabled={connecting || disconnecting}
+            className={`mt-6 flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-60 sm:w-auto ${
+              isConnected
+                ? "border-border bg-surface text-foreground border"
+                : "bg-brand text-brand-foreground"
+            }`}
+          >
+            {connecting || disconnecting ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : isConnected ? (
+              <LogOut className="size-4" />
+            ) : (
+              <YoutubeIcon className="size-4" />
+            )}
+            {isConnected ? "Disconnect Channel" : "Connect YouTube Channel"}
+          </button>
+        )}
       </section>
+
+      {/* Channel picker: shown when the connected Google account manages
+          more than one channel, so the user picks which one instead of us
+          guessing the first one Google's API happens to return. */}
+      {hasPendingChannels && (
+        <section className="border-border bg-surface/60 rounded-3xl border p-7">
+          <h2 className="text-base font-semibold">Choose a channel</h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            This Google account manages more than one YouTube channel. Pick
+            the one you want ClipCast to auto-clip.
+          </p>
+          <div className="mt-4 space-y-2">
+            {pendingChannels.map((channel) => (
+              <button
+                key={channel.id}
+                onClick={() => handleSelectChannel(channel)}
+                disabled={selectingChannelId !== null}
+                className="border-border bg-background hover:bg-surface-2 flex w-full items-center gap-3 rounded-2xl border p-4 text-left transition-colors disabled:opacity-60"
+              >
+                <div className="bg-brand-soft text-brand grid size-10 shrink-0 place-items-center rounded-xl">
+                  <YoutubeIcon className="size-5" />
+                </div>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                  {channel.title}
+                </span>
+                {selectingChannelId === channel.id ? (
+                  <Loader2 className="size-4 shrink-0 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="text-muted-foreground size-4 shrink-0" />
+                )}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Latest videos (only when connected) */}
       {isConnected && (
