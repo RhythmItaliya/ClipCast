@@ -190,18 +190,19 @@ a migration:
 
 ```prisma
 model UploadedFile {
-    id           String   @id @default(cuid())
-    s3Key        String
-    displayName  String?
-    youtubeUrl   String?
-    uploaded     Boolean  @default(false)
-    status       String   @default("queued") // queued|processing|processed|failed|no credits|cancelled
-    clipMode     String?  @default("qa")
-    isPreview    Boolean? @default(false)
-    duration     Int?
-    errorMessage String?
-    createdAt    DateTime @default(now())
-    updatedAt    DateTime @updatedAt
+    id                  String   @id @default(cuid())
+    s3Key               String
+    displayName         String?
+    youtubeUrl          String?
+    uploaded            Boolean  @default(false)
+    status              String   @default("queued") // queued|processing|processed|failed|no credits|cancelled
+    clipMode            String?  @default("qa")
+    isPreview           Boolean? @default(false)
+    duration            Int?
+    errorMessage        String?  // friendly, shown to the job's own user
+    internalErrorDetail String?  // raw technical detail, admin panel only
+    createdAt           DateTime @default(now())
+    updatedAt           DateTime @updatedAt
 
     clips Clip[]
     user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -211,6 +212,17 @@ model UploadedFile {
     @@index([userId, createdAt])  // dashboard list + rolling-24h upload count
     @@index([userId, status])     // active-job counts for usage limits
 }
+```
+
+`errorMessage` and `internalErrorDetail` are deliberately separate fields, not
+one field shown differently by role. `errorMessage` is plain language with no
+mention of proxies, HTTP status codes, S3, or Modal, built by
+`JobProcessingError` in `src/inngest/functions.ts`, which every throw site in
+the processing function uses instead of a plain `Error` so a raw backend
+string never ends up in a normal user's queue table.
+`internalErrorDetail` carries the real diagnostic text (HTTP status, proxy
+output, Modal response body) and is only ever selected and rendered in the
+admin jobs table.
 
 model Clip {
     id        String  @id @default(cuid())

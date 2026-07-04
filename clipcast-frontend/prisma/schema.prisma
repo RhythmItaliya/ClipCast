@@ -89,6 +89,10 @@ model User {
     youtubeAccessToken  String?
     youtubeRefreshToken String?
     youtubeTokenExpiry  DateTime?
+    // Candidate channels awaiting a pick when the connected Google account
+    // has more than one (legacy multi-channel accounts, or several Brand
+    // Accounts). Array of {id, title}. Cleared once one is selected.
+    youtubePendingChannels Json?
 
     createdAt DateTime @default(now())
     updatedAt DateTime @default(now()) @updatedAt
@@ -138,7 +142,13 @@ model UploadedFile {
     clipMode String? @default("qa")
     isPreview Boolean? @default(false)
     duration    Int?
+    // Friendly, non-technical message shown to the job's own user. Never
+    // contains raw backend detail (HTTP codes, proxy/S3/Modal internals) —
+    // that goes in internalErrorDetail instead, for admins only.
     errorMessage String?
+    // Raw technical failure detail (HTTP status, stderr, proxy/Modal error
+    // text). Only ever shown in the admin panel, never to the job's user.
+    internalErrorDetail String?
     // Human-readable record of which model/service handled each stage of this
     // job (e.g. "WhisperX large-v2 (transcription) · Gemini 2.5 Flash 8/9
     // chunk(s) (moments), HF fallback Qwen/Qwen2.5-7B-Instruct 1/9 · TalkNet
