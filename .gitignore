@@ -2,11 +2,8 @@
 .DS_Store
 .AppleDouble
 .LSOverride
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+.vscode/
+.claude/
 *.sublime-workspace
 
 # ── Logs / temp ───────────────────────────────────────────────
