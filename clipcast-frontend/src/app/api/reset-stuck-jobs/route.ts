@@ -49,10 +49,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Reset status and re-fire Inngest events
+  // Reset status and re-fire Inngest events. Clear the previous failure's
+  // error text too — otherwise the row shows a fresh "Processing" badge
+  // next to a stale error message from the attempt being retried.
   await db.uploadedFile.update({
     where: { id: fileId },
-    data: { status: "queued" },
+    data: { status: "queued", errorMessage: null, internalErrorDetail: null },
   });
 
   try {

@@ -30,6 +30,8 @@ async function sendProcessEvent(
           status: "failed",
           errorMessage:
             "Could not reach the processing queue. Please retry in a moment.",
+          internalErrorDetail:
+            err instanceof Error ? err.message : String(err),
         },
       })
       .catch(() => undefined);

@@ -2,6 +2,26 @@ import { env } from "~/env";
 import { inngest } from "./client";
 import { db } from "~/server/db";
 
+/**
+ * Carries two versions of a failure: `friendlyMessage` (shown to the job's
+ * own user — plain language, never mentions proxies, HTTP codes, S3, Modal,
+ * or GPUs by name) and the raw `message` (the Error's own message, shown
+ * only in the admin panel). Every throw site in processVideoFn should throw
+ * this instead of a plain Error, so no raw backend text ever reaches a
+ * regular user's screen.
+ */
+class JobProcessingError extends Error {
+  readonly friendlyMessage: string;
+  constructor(friendlyMessage: string, technicalDetail: string) {
+    super(technicalDetail);
+    this.name = "JobProcessingError";
+    this.friendlyMessage = friendlyMessage;
+  }
+}
+
+const GENERIC_FRIENDLY_ERROR =
+  "Something went wrong while processing your video. Please try again, and contact support if it keeps happening.";
+
 // ── Video Processing ────────────────────────────────────────────────────────
 export const processVideoFn = inngest.createFunction(
   {
@@ -64,8 +84,13 @@ export const processVideoFn = inngest.createFunction(
         },
       );
 
-      let durationSeconds = 0;
-      await step.run("get-video-duration", async () => {
+      // Inngest memoizes completed steps: on replay (which happens after
+      // every step.sleep/step.fetch below), this callback is NOT re-invoked,
+      // only its return value is reused. A step that sets an outer variable
+      // instead of returning its result loses that value on every replay,
+      // since the mutation only ever ran once. Returning it and assigning
+      // the const from the awaited step is what actually survives replay.
+      const durationSeconds = await step.run("get-video-duration", async () => {
         // No local yt-dlp here: for YouTube jobs the real duration is measured
         // on the Modal worker after it downloads the video (exact credits are
         // deducted afterwards). For direct uploads we fall back to any stored
@@ -74,18 +99,17 @@ export const processVideoFn = inngest.createFunction(
           const file = await db.uploadedFile.findUnique({
             where: { id: uploadedFileId },
           });
-          if (youtubeUrl) {
-            durationSeconds = file?.duration ?? 0;
-          } else {
-            durationSeconds = file?.duration ?? 300;
-            await db.uploadedFile.update({
-              where: { id: uploadedFileId },
-              data: { duration: Math.round(durationSeconds) },
-            });
-          }
+          if (youtubeUrl) return file?.duration ?? 0;
+
+          const fallbackDuration = file?.duration ?? 300;
+          await db.uploadedFile.update({
+            where: { id: uploadedFileId },
+            data: { duration: Math.round(fallbackDuration) },
+          });
+          return fallbackDuration;
         } catch (e) {
           console.warn("Could not determine duration", e);
-          durationSeconds = youtubeUrl ? 0 : 300;
+          return youtubeUrl ? 0 : 300;
         }
       });
 
@@ -100,19 +124,42 @@ export const processVideoFn = inngest.createFunction(
         await step.run("set-status-processing", async () => {
           await db.uploadedFile.update({
             where: { id: uploadedFileId },
-            data: { status: "processing" },
+            // Clear any error left over from a previous failed attempt —
+            // otherwise a retried job shows a fresh "Processing" badge next
+            // to a stale error message from the run before it.
+            data: {
+              status: "processing",
+              errorMessage: null,
+              internalErrorDetail: null,
+            },
           });
+          return { status: "processing" };
         });
+
+        // Plain reassignment based on an already-resolved step result below,
+        // not a mutation Inngest needs to replay — safe, unlike the pattern
+        // get-video-duration used to have.
+        let effectiveDurationSeconds = durationSeconds;
 
         // ── YouTube download phase ─────────────────────────────────────────
         // YouTube sources pass through a CPU-only Modal downloader and land in
         // S3. The GPU worker then reads only from S3, so neither stage
         // consumes Inngest execution time waiting for the download to finish.
         if (youtubeUrl) {
+          // Shared wording for the download-phase failures below: the user
+          // doesn't need to know this runs through a rotating proxy pool, or
+          // what HTTP status came back — just that it's usually temporary
+          // and what to try next.
+          const DOWNLOAD_FAILED_FRIENDLY =
+            "We couldn't download this YouTube video right now. This is " +
+            "usually temporary — try again in a few minutes, or upload the " +
+            "file directly instead.";
+
           if (!env.DOWNLOAD_VIDEO_ENDPOINT) {
-            throw new Error(
-              "YTDLP_ERROR: DOWNLOAD_VIDEO_ENDPOINT is not configured. " +
-              "Add it to your .env and restart.",
+            throw new JobProcessingError(
+              "YouTube downloads aren't available right now. Please try " +
+                "uploading the file directly, or try again later.",
+              "DOWNLOAD_VIDEO_ENDPOINT is not configured. Add it to .env and restart.",
             );
           }
 
@@ -128,9 +175,10 @@ export const processVideoFn = inngest.createFunction(
 
           const callId = submitted.data.call_id;
           if (submitted.httpStatus !== 202 || !callId) {
-            throw new Error(
-              `YTDLP_ERROR: Could not submit cloud download (HTTP ${submitted.httpStatus}): ` +
-              submitted.body.slice(0, 800),
+            throw new JobProcessingError(
+              DOWNLOAD_FAILED_FRIENDLY,
+              `Could not submit cloud download (HTTP ${submitted.httpStatus}): ` +
+                submitted.body.slice(0, 800),
             );
           }
 
@@ -171,8 +219,9 @@ export const processVideoFn = inngest.createFunction(
               const detail =
                 (pollResult.data as { detail?: string }).detail ??
                 pollResult.body.slice(0, 600);
-              throw new Error(
-                `YTDLP_ERROR: Cloud download failed (HTTP ${pollResult.httpStatus}): ${detail}`,
+              throw new JobProcessingError(
+                DOWNLOAD_FAILED_FRIENDLY,
+                `Cloud download failed (HTTP ${pollResult.httpStatus}): ${detail}`,
               );
             }
 
@@ -182,14 +231,17 @@ export const processVideoFn = inngest.createFunction(
           }
 
           if (!downloadData) {
-            throw new Error(
-              "YTDLP_ERROR: Cloud download did not finish within 90 poll attempts (~85 min). " +
-              "The video may be too long or the proxy is blocked.",
+            throw new JobProcessingError(
+              "This video is taking longer than expected to download. It " +
+                "may be too long, or YouTube downloads are temporarily " +
+                "restricted. Please try again later.",
+              "Cloud download did not finish within 90 poll attempts (~85 min). " +
+                "The video may be too long or the proxy is blocked.",
             );
           }
 
           if (downloadData.duration && downloadData.duration > 0) {
-            durationSeconds = downloadData.duration;
+            effectiveDurationSeconds = downloadData.duration;
           }
         }
 
@@ -221,14 +273,11 @@ export const processVideoFn = inngest.createFunction(
 
         if (!modalResponse.ok) {
           const errText = await modalResponse.text().catch(() => "");
-          // Map common Modal/processor HTTP codes to user-friendly messages
-          const friendlyDetail = parseProcessorError(
+          const { friendly, detail } = parseProcessorError(
             modalResponse.status,
             errText,
           );
-          throw new Error(
-            `Modal GPU processor returned ${modalResponse.status}: ${friendlyDetail}`,
-          );
+          throw new JobProcessingError(friendly, detail);
         }
 
         const modalData = (await modalResponse.json()) as {
@@ -255,11 +304,13 @@ export const processVideoFn = inngest.createFunction(
 
         // Billing rule: 1 credit per minute of source video, rounded up, with a
         // minimum of 1 credit per processed video. Guard against a 0/empty
-        // duration from Modal (which would otherwise deduct nothing).
+        // duration from Modal (which would otherwise deduct nothing) by
+        // falling back to the downloader's own measured duration for
+        // YouTube jobs, rather than the pre-download 0 estimate.
         const exactDuration =
           modalData.duration && modalData.duration > 0
             ? modalData.duration
-            : durationSeconds;
+            : effectiveDurationSeconds;
         const finalCreditsToDeduct = Math.max(1, Math.ceil(exactDuration / 60));
 
         await step.run("update-exact-duration", async () => {
@@ -270,6 +321,10 @@ export const processVideoFn = inngest.createFunction(
               processingSummary: modalData.processing_summary ?? null,
             },
           });
+          return {
+            duration: Math.round(exactDuration),
+            processingSummary: modalData.processing_summary ?? null,
+          };
         });
 
         const clipsFromModal = modalData.clips ?? [];
@@ -289,6 +344,7 @@ export const processVideoFn = inngest.createFunction(
               })),
             });
           }
+          return { clipsCreated: clipsFromModal.length };
         });
 
         // Billing rule: only charge once the job actually produced something.
@@ -301,19 +357,46 @@ export const processVideoFn = inngest.createFunction(
         // specific message instead of the generic "processed" status.
         if (clipsFromModal.length > 0) {
           await step.run("deduct-credits", async () => {
+            // The upfront gate only checked for a minimum of 1 credit for
+            // YouTube jobs (real duration is unknown until download), so the
+            // true-up here can call for far more than that. Clamp the
+            // decrement to what the user actually has so a job never pushes
+            // their balance negative — they keep the clips they were just
+            // rendered (the GPU cost is already spent), just at a 0 balance
+            // instead of an owed-money one.
+            const user = await db.user.findUnique({
+              where: { id: userId },
+              select: { credits: true },
+            });
+            const currentCredits = user?.credits ?? 0;
+            const actualDeduction = Math.min(
+              finalCreditsToDeduct,
+              Math.max(0, currentCredits),
+            );
             await db.user.update({
               where: { id: userId },
-              data: {
-                credits: { decrement: finalCreditsToDeduct },
-              },
+              data: { credits: { decrement: actualDeduction } },
             });
+            return {
+              requestedDeduction: finalCreditsToDeduct,
+              actualDeduction,
+              creditsRemaining: currentCredits - actualDeduction,
+            };
           });
 
           await step.run("set-status-processed", async () => {
             await db.uploadedFile.update({
               where: { id: uploadedFileId },
-              data: { status: "processed" },
+              data: {
+                status: "processed",
+                // Clear any error text left from a prior failed attempt on
+                // this same job — a completed job should never still show
+                // stale red error text from before it succeeded.
+                errorMessage: null,
+                internalErrorDetail: null,
+              },
             });
+            return { status: "processed" };
           });
         } else {
           const noMomentsIdentified = !modalData.clips_found;
@@ -322,14 +405,24 @@ export const processVideoFn = inngest.createFunction(
               "were created. You have not been charged for this job."
             : "Moments were found but every clip failed to render, so no " +
               "clips were created. You have not been charged for this job.";
+          // Admin-only detail: which/how many clips were identified vs.
+          // rendered, and any per-clip render errors, for debugging.
+          const noClipsDetail =
+            `clips_found=${modalData.clips_found ?? 0}, ` +
+            `clips_rendered=${modalData.clips_rendered ?? 0}` +
+            (modalData.clip_warnings?.length
+              ? `; warnings: ${modalData.clip_warnings.join("; ")}`
+              : "");
           await step.run("set-status-no-clips", async () => {
             await db.uploadedFile.update({
               where: { id: uploadedFileId },
               data: {
                 status: "failed",
                 errorMessage: noClipsMessage,
+                internalErrorDetail: noClipsDetail,
               },
             });
+            return { status: "failed", reason: noMomentsIdentified ? "no_moments" : "render_failed" };
           });
         }
       } else {
@@ -338,23 +431,26 @@ export const processVideoFn = inngest.createFunction(
             where: { id: uploadedFileId },
             data: { status: "no credits" },
           });
+          return { status: "no credits", requiredCredits, availableCredits: credits };
         });
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      const technicalDetail =
+        error instanceof Error ? error.message : String(error);
+      const friendlyMessage =
+        error instanceof JobProcessingError
+          ? error.friendlyMessage
+          : GENERIC_FRIENDLY_ERROR;
       console.error(
         `[inngest] processVideo failed for ${uploadedFileId}:`,
-        message,
+        technicalDetail,
       );
-      // Extract clean user-facing message for YTDLP errors
-      const userMessage = message.startsWith("YTDLP_ERROR: ")
-        ? message.slice("YTDLP_ERROR: ".length)
-        : null;
       await db.uploadedFile.update({
         where: { id: uploadedFileId },
         data: {
           status: "failed",
-          ...(userMessage ? { errorMessage: userMessage } : {}),
+          errorMessage: friendlyMessage,
+          internalErrorDetail: technicalDetail,
         },
       });
       throw error;
@@ -415,6 +511,7 @@ export const dailyClipScheduler = inngest.createFunction(
         );
         // Future: use YouTube API to get latest video URL, pass as youtubeUrl
         // await inngest.send({ name: "process-video-events", data: { ... } });
+        return { userId: user.id, queued: false, reason: "auto-clip upload not yet implemented" };
       });
     }
 
@@ -486,40 +583,58 @@ async function postCloudDownloader(payload: {
 }
 
 /**
- * Map Modal processor HTTP error codes to user-readable messages.
- * These are stored in uploadedFile.errorMessage and shown in the queue UI.
+ * Splits a processor failure into a friendly message (no HTTP codes, no
+ * infrastructure names — shown to the job's own user) and the raw detail
+ * (shown only in the admin panel, stored in internalErrorDetail).
  */
-function parseProcessorError(httpStatus: number, body: string): string {
-  let detail = "";
+function parseProcessorError(
+  httpStatus: number,
+  body: string,
+): { friendly: string; detail: string } {
+  let rawDetail = "";
   try {
     const parsed = JSON.parse(body) as { detail?: string };
-    detail = parsed.detail ?? body;
+    rawDetail = parsed.detail ?? body;
   } catch {
-    detail = body;
+    rawDetail = body;
   }
-  detail = detail.slice(0, 400);
+  const detail = `HTTP ${httpStatus}: ${rawDetail.slice(0, 400)}`;
 
-  // Use HTTP status as first signal
   if (httpStatus === 404) {
-    return `Source video not found in S3. The download may not have completed. (${detail})`;
+    return {
+      friendly:
+        "We couldn't find your uploaded video. Please try uploading it again.",
+      detail,
+    };
   }
   if (httpStatus === 422) {
-    return `The video file is invalid or has no usable audio. Try a different video. (${detail})`;
+    return {
+      friendly:
+        "This video file couldn't be processed. Make sure it's a valid " +
+        "video with audio, then try again.",
+      detail,
+    };
   }
   if (httpStatus === 429) {
-    return `Gemini API rate limit hit. Wait a few minutes and retry. (${detail})`;
+    return {
+      friendly:
+        "Our clipping engine is briefly busy. Please wait a few minutes and try again.",
+      detail,
+    };
   }
   if (httpStatus === 503) {
-    if (detail.toLowerCase().includes("memory") || detail.toLowerCase().includes("cuda")) {
-      return "GPU ran out of memory. Try a shorter video or use Preview mode.";
+    if (rawDetail.toLowerCase().includes("memory") || rawDetail.toLowerCase().includes("cuda")) {
+      return {
+        friendly:
+          "This video needs more processing power than is available right " +
+          "now. Try a shorter video, or use Preview mode.",
+        detail,
+      };
     }
-    return `Processing service temporarily unavailable. (${detail})`;
+    return {
+      friendly: "Our processing service is temporarily unavailable. Please try again shortly.",
+      detail,
+    };
   }
-  if (httpStatus === 401) {
-    return "Authentication error with the processing endpoint. Contact support.";
-  }
-  if (httpStatus >= 500) {
-    return `Processing server error. Check Modal logs for details. (${detail})`;
-  }
-  return detail || `Unexpected error (HTTP ${httpStatus})`;
+  return { friendly: GENERIC_FRIENDLY_ERROR, detail };
 }
