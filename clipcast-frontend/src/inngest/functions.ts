@@ -152,7 +152,7 @@ export const processVideoFn = inngest.createFunction(
           // and what to try next.
           const DOWNLOAD_FAILED_FRIENDLY =
             "We couldn't download this YouTube video right now. This is " +
-            "usually temporary — try again in a few minutes, or upload the " +
+            "usually temporary, try again in a few minutes, or upload the " +
             "file directly instead.";
 
           if (!env.DOWNLOAD_VIDEO_ENDPOINT) {
