@@ -236,6 +236,7 @@ export const processVideoFn = inngest.createFunction(
           clips_found?: number;
           clips_rendered?: number;
           clip_warnings?: string[];
+          processing_summary?: string;
           clips?: {
             s3_key: string;
             thumbnail_s3_key?: string;
@@ -264,15 +265,19 @@ export const processVideoFn = inngest.createFunction(
         await step.run("update-exact-duration", async () => {
           await db.uploadedFile.update({
             where: { id: uploadedFileId },
-            data: { duration: Math.round(exactDuration) },
+            data: {
+              duration: Math.round(exactDuration),
+              processingSummary: modalData.processing_summary ?? null,
+            },
           });
         });
 
+        const clipsFromModal = modalData.clips ?? [];
+
         await step.run("create-clips-in-db", async () => {
-          const clips = modalData.clips ?? [];
-          if (clips.length > 0) {
+          if (clipsFromModal.length > 0) {
             await db.clip.createMany({
-              data: clips.map((clip) => ({
+              data: clipsFromModal.map((clip) => ({
                 s3Key: clip.s3_key,
                 thumbnailS3Key: clip.thumbnail_s3_key ?? null,
                 title: clip.title || null,
@@ -286,21 +291,47 @@ export const processVideoFn = inngest.createFunction(
           }
         });
 
-        await step.run("deduct-credits", async () => {
-          await db.user.update({
-            where: { id: userId },
-            data: {
-              credits: { decrement: finalCreditsToDeduct },
-            },
+        // Billing rule: only charge once the job actually produced something.
+        // A video that fully processes (transcribed, no crash) but whose
+        // moment-identification step comes back empty — most commonly a very
+        // long source with no clear standalone highlights, or a transient
+        // model hiccup — used to still deduct a full duration-based credit
+        // charge. That's not fair to the user: they got zero clips for their
+        // credits. Skip the charge entirely and fail the job with a clear,
+        // specific message instead of the generic "processed" status.
+        if (clipsFromModal.length > 0) {
+          await step.run("deduct-credits", async () => {
+            await db.user.update({
+              where: { id: userId },
+              data: {
+                credits: { decrement: finalCreditsToDeduct },
+              },
+            });
           });
-        });
 
-        await step.run("set-status-processed", async () => {
-          await db.uploadedFile.update({
-            where: { id: uploadedFileId },
-            data: { status: "processed" },
+          await step.run("set-status-processed", async () => {
+            await db.uploadedFile.update({
+              where: { id: uploadedFileId },
+              data: { status: "processed" },
+            });
           });
-        });
+        } else {
+          const noMomentsIdentified = !modalData.clips_found;
+          const noClipsMessage = noMomentsIdentified
+            ? "No usable moments were found in this video, so no clips " +
+              "were created. You have not been charged for this job."
+            : "Moments were found but every clip failed to render, so no " +
+              "clips were created. You have not been charged for this job.";
+          await step.run("set-status-no-clips", async () => {
+            await db.uploadedFile.update({
+              where: { id: uploadedFileId },
+              data: {
+                status: "failed",
+                errorMessage: noClipsMessage,
+              },
+            });
+          });
+        }
       } else {
         await step.run("set-status-no-credits", async () => {
           await db.uploadedFile.update({
