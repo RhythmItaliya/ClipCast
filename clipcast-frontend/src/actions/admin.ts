@@ -247,6 +247,7 @@ export async function getAdminJobs(
         clipMode: true,
         isPreview: true,
         errorMessage: true,
+        processingSummary: true,
         createdAt: true,
         updatedAt: true,
         _count: { select: { clips: true } },

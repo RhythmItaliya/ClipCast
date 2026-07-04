@@ -3,5 +3,6 @@ import { auth } from "~/server/auth";
 
 export default async function HomePage() {
   const session = await auth();
-  redirect(session?.user ? "/dashboard" : "/login");
+  if (!session?.user) redirect("/login");
+  redirect(session.user.role === "ADMIN" ? "/admin" : "/dashboard");
 }

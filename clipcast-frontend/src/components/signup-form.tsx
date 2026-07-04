@@ -46,7 +46,7 @@ export function SignupForm({
       }
 
       toast.success("Account created!", {
-        description: "You have 10 free credits. Please log in.",
+        description: "You have 20 free credits. Please log in.",
       });
       router.push("/login");
     } catch {
@@ -66,7 +66,7 @@ export function SignupForm({
     }
     setOauthLoading(provider);
     try {
-      await signIn(provider, { redirectTo: "/dashboard" });
+      await signIn(provider, { redirectTo: "/post-login" });
     } catch {
       toast.error(FRIENDLY_MESSAGES.network);
       setOauthLoading(null);
@@ -82,7 +82,7 @@ export function SignupForm({
           Create your account
         </h1>
         <p className="text-muted-foreground mt-2 text-sm">
-          Start turning podcasts into share-ready clips — 10 free credits
+          Start turning podcasts into share-ready clips, 20 free credits
           included.
         </p>
       </div>

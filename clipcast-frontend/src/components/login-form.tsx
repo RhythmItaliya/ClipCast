@@ -73,7 +73,9 @@ export function LoginForm({
       if (signInResult?.error) {
         setError("Invalid email or password.");
       } else {
-        router.push("/dashboard");
+        // /post-login checks role server-side and sends admins to /admin,
+        // everyone else to /dashboard.
+        router.push("/post-login");
       }
     } catch {
       setError(
@@ -92,7 +94,7 @@ export function LoginForm({
     setError(null);
     setOauthLoading(provider);
     try {
-      await signIn(provider, { redirectTo: "/dashboard" });
+      await signIn(provider, { redirectTo: "/post-login" });
     } catch {
       setError(FRIENDLY_MESSAGES.network);
       setOauthLoading(null);

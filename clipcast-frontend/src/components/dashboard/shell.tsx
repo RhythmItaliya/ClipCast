@@ -9,6 +9,7 @@ import {
   LogOut,
   Scissors,
   Settings,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
@@ -61,11 +62,13 @@ export function DashboardShell({
   credits,
   email,
   name,
+  isAdmin = false,
 }: {
   children: ReactNode;
   credits: number;
   email: string;
   name: string | null;
+  isAdmin?: boolean;
 }) {
   const pathname = usePathname();
   const current =
@@ -137,6 +140,18 @@ export function DashboardShell({
               <Coins className="size-3.5" /> Get more credits
             </Link>
           </div>
+
+          {isAdmin && (
+            <div className="px-3 pb-1">
+              <Link
+                href="/admin"
+                className="border-brand/20 bg-brand-soft text-brand hover:opacity-90 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-opacity"
+              >
+                <ShieldCheck className="size-4" />
+                Admin panel
+              </Link>
+            </div>
+          )}
 
           <div className="border-border border-t p-3">
             <div className="flex items-center gap-3 rounded-lg p-2">

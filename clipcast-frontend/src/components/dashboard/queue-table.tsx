@@ -36,6 +36,7 @@ export type QueueFile = {
   isPreview: boolean | null;
   clipsCount: number;
   errorMessage: string | null;
+  processingSummary: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -397,6 +398,7 @@ function QueueRow({
       <td className="px-5 py-3">
         <span
           className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-widest uppercase ring-1 ${badge.className}`}
+          title={item.processingSummary ?? undefined}
         >
           {active && <Loader2 className="size-2.5 animate-spin" />}
           {badge.label}

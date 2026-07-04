@@ -21,6 +21,7 @@ type AdminJob = {
   clipMode: string | null;
   isPreview: boolean | null;
   errorMessage: string | null;
+  processingSummary: string | null;
   createdAt: Date;
   updatedAt: Date;
   _count: { clips: number };
@@ -193,6 +194,7 @@ export function JobsTable({
                     <td className="px-4 py-3">
                       <span
                         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${statusMeta.classes}`}
+                        title={job.processingSummary ?? undefined}
                       >
                         {statusMeta.icon}
                         {statusMeta.label}

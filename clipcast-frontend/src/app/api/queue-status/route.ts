@@ -27,6 +27,7 @@ export async function GET() {
             clipMode: true,
             isPreview: true,
             errorMessage: true,
+            processingSummary: true,
             createdAt: true,
             updatedAt: true,
             _count: {
@@ -59,6 +60,7 @@ export async function GET() {
     clipMode: file.clipMode,
     isPreview: file.isPreview,
     errorMessage: file.errorMessage ?? null,
+    processingSummary: file.processingSummary ?? null,
     clipsCount: file._count.clips,
     createdAt: file.createdAt,
     updatedAt: file.updatedAt,

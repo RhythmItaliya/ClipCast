@@ -26,7 +26,12 @@ export default async function DashboardLayout({
   }
 
   return (
-    <DashboardShell credits={user.credits} email={user.email} name={user.name}>
+    <DashboardShell
+      credits={user.credits}
+      email={user.email}
+      name={user.name}
+      isAdmin={session.user.role === "ADMIN"}
+    >
       {children}
     </DashboardShell>
   );
