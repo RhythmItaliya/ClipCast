@@ -68,40 +68,59 @@ export async function POST(req: Request) {
             pack = "large";
           }
 
-          // Resolve the target user once so we can both increment credits and
-          // write a matching Purchase ledger row against the same id.
+          // Resolve the target user first (read-only) so the actual writes
+          // below — increment, Purchase row, CreditTransaction row — can all
+          // go in one $transaction. These three used to run as separate
+          // sequential awaits: if anything interrupted execution between
+          // them (a thrown error, a dev-server restart mid-request), credits
+          // could get incremented with no Purchase/CreditTransaction ever
+          // written to back it up, and the alreadyProcessed guard above
+          // would then hide the gap from any Stripe retry since no
+          // partial retry can re-run just the missing piece. Atomic now —
+          // either all three happen, or none do.
           let resolvedUserId = userId ?? null;
-          if (resolvedUserId) {
-            await db.user.update({
-              where: { id: resolvedUserId },
-              data: {
-                credits: { increment: creditsToAdd },
-                stripeCustomerId: customerId,
-              },
-            });
-          } else {
-            const updated = await db.user.update({
+          if (!resolvedUserId) {
+            const existing = await db.user.findUniqueOrThrow({
               where: { stripeCustomerId: customerId },
-              data: {
-                credits: { increment: creditsToAdd },
-              },
               select: { id: true },
             });
-            resolvedUserId = updated.id;
+            resolvedUserId = existing.id;
           }
 
           if (pack && resolvedUserId) {
-            await db.purchase.create({
-              data: {
-                userId: resolvedUserId,
-                stripeSessionId: session.id,
-                stripeCustomerId: customerId,
-                priceId,
-                pack,
-                credits: creditsToAdd,
-                amountTotal: session.amount_total ?? 0,
-                currency: session.currency ?? "usd",
-              },
+            await db.$transaction(async (tx) => {
+              const updated = await tx.user.update({
+                where: { id: resolvedUserId! },
+                data: {
+                  credits: { increment: creditsToAdd },
+                  stripeCustomerId: customerId,
+                },
+                select: { credits: true },
+              });
+
+              const purchase = await tx.purchase.create({
+                data: {
+                  userId: resolvedUserId!,
+                  stripeSessionId: session.id,
+                  stripeCustomerId: customerId,
+                  priceId,
+                  pack,
+                  credits: creditsToAdd,
+                  amountTotal: session.amount_total ?? 0,
+                  currency: session.currency ?? "usd",
+                },
+              });
+
+              await tx.creditTransaction.create({
+                data: {
+                  userId: resolvedUserId!,
+                  type: "purchase",
+                  amount: creditsToAdd,
+                  balanceAfter: updated.credits,
+                  purchaseId: purchase.id,
+                  description: `${pack[0]!.toUpperCase()}${pack.slice(1)} credit pack`,
+                },
+              });
             });
           }
         }

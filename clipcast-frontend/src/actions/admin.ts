@@ -90,6 +90,15 @@ export async function adjustUserCredits(userId: string, delta: number) {
       data: { credits: { increment: delta } },
       select: { credits: true, email: true },
     });
+    await db.creditTransaction.create({
+      data: {
+        userId,
+        type: "admin_adjust",
+        amount: delta,
+        balanceAfter: updated.credits,
+        description: `Adjusted by admin ${admin.email}`,
+      },
+    });
     await logAdminAction(
       admin,
       "credits.adjust",
@@ -176,7 +185,7 @@ export async function getAdminUserDetail(userId: string) {
   });
   if (!user) return null;
 
-  const [jobs, clips, purchases] = await Promise.all([
+  const [jobs, clips, purchases, transactions] = await Promise.all([
     db.uploadedFile.findMany({
       where: { userId },
       take: 10,
@@ -215,9 +224,22 @@ export async function getAdminUserDetail(userId: string) {
         createdAt: true,
       },
     }),
+    db.creditTransaction.findMany({
+      where: { userId },
+      take: 20,
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        type: true,
+        amount: true,
+        balanceAfter: true,
+        description: true,
+        createdAt: true,
+      },
+    }),
   ]);
 
-  return { user, jobs, clips, purchases };
+  return { user, jobs, clips, purchases, transactions };
 }
 
 // ── Jobs ─────────────────────────────────────────────────────────────────────

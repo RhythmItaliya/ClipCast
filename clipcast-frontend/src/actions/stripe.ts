@@ -46,3 +46,32 @@ export async function createCheckoutSession(priceId: PriceId) {
 
   redirect(session.url);
 }
+
+export type CreditTransactionRow = {
+  id: string;
+  type: string;
+  amount: number;
+  balanceAfter: number;
+  description: string | null;
+  createdAt: Date;
+};
+
+/** The signed-in user's own credit ledger — purchases and job charges, newest first. */
+export async function getMyCreditTransactions(): Promise<CreditTransactionRow[]> {
+  const serverSession = await auth();
+  if (!serverSession?.user?.id) return [];
+
+  return db.creditTransaction.findMany({
+    where: { userId: serverSession.user.id },
+    orderBy: { createdAt: "desc" },
+    take: 30,
+    select: {
+      id: true,
+      type: true,
+      amount: true,
+      balanceAfter: true,
+      description: true,
+      createdAt: true,
+    },
+  });
+}

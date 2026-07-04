@@ -13,8 +13,15 @@ import { db } from "~/server/db";
  * no channel is actively misleading and unactionable.
  */
 class YouTubeConnectError extends Error {
-  readonly code: "oauth_failed" | "no_channel" | "api_error";
-  constructor(code: "oauth_failed" | "no_channel" | "api_error", message: string) {
+  readonly code:
+    | "oauth_failed"
+    | "no_channel"
+    | "api_disabled"
+    | "insufficient_scope"
+    | "quota_exceeded"
+    | "youtube_account_required"
+    | "api_error";
+  constructor(code: YouTubeConnectError["code"], message: string) {
     super(message);
     this.name = "YouTubeConnectError";
     this.code = code;
@@ -85,9 +92,33 @@ export async function GET(req: Request) {
     // the account has no channel. Conflating the two is exactly what made
     // this show "No Channel Found" for accounts that do have one.
     if (!channelRes.ok) {
+      let googleReason = "";
+      try {
+        const parsed = JSON.parse(channelBody) as {
+          error?: { errors?: { reason?: string }[]; status?: string };
+        };
+        googleReason =
+          parsed.error?.errors?.[0]?.reason ?? parsed.error?.status ?? "";
+      } catch {
+        // The raw response is still logged below when Google returns text.
+      }
+      const normalizedReason = googleReason.toLowerCase();
+      const errorCode =
+        normalizedReason.includes("accessnotconfigured") ||
+        normalizedReason.includes("service_disabled")
+          ? "api_disabled"
+          : normalizedReason.includes("insufficient") ||
+              normalizedReason.includes("forbidden")
+            ? "insufficient_scope"
+            : normalizedReason.includes("quota") ||
+                normalizedReason.includes("dailylimit")
+              ? "quota_exceeded"
+              : normalizedReason.includes("youtubesignuprequired")
+                ? "youtube_account_required"
+                : "api_error";
       throw new YouTubeConnectError(
-        "api_error",
-        `Channel lookup failed (HTTP ${channelRes.status}): ${channelBody.slice(0, 500)}`,
+        errorCode,
+        `Channel lookup failed (HTTP ${channelRes.status}, reason=${googleReason || "unknown"}): ${channelBody.slice(0, 500)}`,
       );
     }
 

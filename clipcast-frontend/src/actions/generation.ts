@@ -43,6 +43,14 @@ export async function processVideo(
   uploadedFileId: string,
   clipMode = "qa",
   previewOnly = false,
+  // Read client-side (see uploader.tsx) via the browser's own video
+  // metadata — free, instant, and closes the same "duration unknown at
+  // gate time" gap the YouTube path had. Without this, the up-front credit
+  // gate had nothing but a flat 5-minute guess to check a 4-hour upload
+  // against. It's only ever used as an upfront estimate, same as the
+  // YouTube duration probe — the actual charge is still based on the real
+  // duration Modal measures after processing.
+  clientDurationSeconds?: number,
 ): Promise<ActionResult> {
   const session = await auth();
   if (!session?.user?.id) {
@@ -59,9 +67,23 @@ export async function processVideo(
 
   if (uploadedVideo.uploaded) return { success: true };
 
+  const validClientDuration =
+    typeof clientDurationSeconds === "number" &&
+    Number.isFinite(clientDurationSeconds) &&
+    clientDurationSeconds > 0
+      ? Math.round(clientDurationSeconds)
+      : undefined;
+
   await db.uploadedFile.update({
     where: { id: uploadedFileId },
-    data: { uploaded: true, clipMode, isPreview: previewOnly },
+    data: {
+      uploaded: true,
+      clipMode,
+      isPreview: previewOnly,
+      ...(validClientDuration !== undefined && {
+        duration: validClientDuration,
+      }),
+    },
   });
 
   const sent = await sendProcessEvent(uploadedVideo.id, {

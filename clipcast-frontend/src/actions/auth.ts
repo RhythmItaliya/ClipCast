@@ -97,6 +97,39 @@ export async function updateProfile(name: string): Promise<ActionResult> {
   }
 }
 
+const NOTIFICATION_FIELDS = {
+  clipReady: "notifyClipReady",
+  weeklySummary: "notifyWeeklySummary",
+  jobFailed: "notifyJobFailed",
+  productUpdates: "notifyProductUpdates",
+} as const;
+
+export type NotificationPref = keyof typeof NOTIFICATION_FIELDS;
+
+/** Persists a single notification toggle from the Settings page. */
+export async function updateNotificationPref(
+  pref: NotificationPref,
+  enabled: boolean,
+): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      error: "Your session has expired. Please log in again.",
+    };
+  }
+
+  try {
+    await db.user.update({
+      where: { id: session.user.id },
+      data: { [NOTIFICATION_FIELDS[pref]]: enabled },
+    });
+    return { success: true };
+  } catch {
+    return { success: false, error: "Could not save that preference." };
+  }
+}
+
 /**
  * Permanently delete the signed-in user's account. Uploaded files, clips,
  * OAuth accounts and sessions are removed via cascading deletes.

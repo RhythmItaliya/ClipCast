@@ -4,9 +4,17 @@ import {
   processVideoFn,
   dailyClipScheduler,
   syncInngestCancellation,
+  sendEmailFn,
+  weeklySummaryScheduler,
 } from "~/inngest/functions";
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
-  functions: [processVideoFn, dailyClipScheduler, syncInngestCancellation],
+  functions: [
+    processVideoFn,
+    dailyClipScheduler,
+    syncInngestCancellation,
+    sendEmailFn,
+    weeklySummaryScheduler,
+  ],
 });
