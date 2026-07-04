@@ -82,6 +82,7 @@ model User {
     uploadedFiles UploadedFile[]
     clips Clip[]
     purchases Purchase[]
+    creditTransactions CreditTransaction[]
     auditLogs AdminAuditLog[] @relation("AuditActor")
 
     youtubeChannelId    String?
@@ -89,13 +90,37 @@ model User {
     youtubeAccessToken  String?
     youtubeRefreshToken String?
     youtubeTokenExpiry  DateTime?
+    youtubeAutoClip     Boolean @default(false)
     // Candidate channels awaiting a pick when the connected Google account
     // has more than one (legacy multi-channel accounts, or several Brand
     // Accounts). Array of {id, title}. Cleared once one is selected.
     youtubePendingChannels Json?
 
+    // Notification preferences shown as toggles in Settings — persisted so
+    // the mail sender can actually respect them, rather than the switches
+    // being decorative UI.
+    notifyClipReady       Boolean @default(true)
+    notifyWeeklySummary   Boolean @default(true)
+    notifyJobFailed       Boolean @default(true)
+    notifyProductUpdates  Boolean @default(false)
+
     createdAt DateTime @default(now())
     updatedAt DateTime @default(now()) @updatedAt
+}
+
+// One-time login codes for the "email me a code" sign-in method — a
+// separate table (not the NextAuth VerificationToken one) because OTPs
+// need attempt-limiting and a consumed flag that model doesn't have.
+model LoginOtp {
+    id         String    @id @default(cuid())
+    email      String
+    codeHash   String
+    expiresAt  DateTime
+    consumedAt DateTime?
+    attempts   Int       @default(0)
+    createdAt  DateTime  @default(now())
+
+    @@index([email])
 }
 
 model Purchase {
@@ -112,6 +137,25 @@ model Purchase {
     createdAt        DateTime @default(now())
 
     @@index([userId])
+}
+
+// Full credit ledger — every event that changes a user's balance, not just
+// the running total on User.credits. amount is signed (positive = credited,
+// negative = debited) so the whole history can be summed/replayed; balanceAfter
+// is a denormalized snapshot for fast display without recomputing a running sum.
+model CreditTransaction {
+    id             String   @id @default(cuid())
+    userId         String
+    user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    type           String   // "purchase" | "job_charge" | "admin_adjust"
+    amount         Int      // signed: positive = credited, negative = debited
+    balanceAfter   Int
+    description    String?
+    uploadedFileId String?  // set for type "job_charge"
+    purchaseId     String?  // set for type "purchase"
+    createdAt      DateTime @default(now())
+
+    @@index([userId, createdAt])
 }
 
 // Tracks admin mutations (credit adjustments, bans, role changes, job resets, clip
@@ -184,6 +228,12 @@ model Clip {
 
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
+
+    // Set once this clip has been posted to the user's connected YouTube
+    // channel — lets the UI show "Posted" instead of "Post to YouTube" and
+    // stops a second upload of the same clip.
+    youtubeVideoId    String?
+    youtubeUploadedAt DateTime?
 
     uploadedFile UploadedFile? @relation(fields: [uploadedFileId], references: [id], onDelete: Cascade)
     uploadedFileId String?

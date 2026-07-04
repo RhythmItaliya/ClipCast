@@ -6,6 +6,7 @@ import GoogleProvider from "next-auth/providers/google";
 import { env } from "~/env";
 import { comparePasswords } from "~/lib/auth";
 import { db } from "~/server/db";
+import { verifyAndConsumeLoginOtp } from "~/server/otp";
 
 // ── Type augmentation — adds `id` and `role` to the session user object ──────
 declare module "next-auth" {
@@ -69,6 +70,33 @@ export const authConfig = {
 
         // Banned users cannot sign in at all.
         if (user.banned) return null;
+
+        return user;
+      },
+    }),
+    // Second sign-in method: a 6-digit code emailed via requestLoginOtp().
+    // Verification is fully inside authorize() (the real auth boundary) —
+    // no separate "verify" action, so a client can't skip straight to
+    // signIn() with a guessed code that was never actually checked.
+    CredentialsProvider({
+      id: "email-otp",
+      name: "Email code",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        code: { label: "Code", type: "text" },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.code) return null;
+
+        const email = (credentials.email as string).trim().toLowerCase();
+        const ok = await verifyAndConsumeLoginOtp(
+          email,
+          credentials.code as string,
+        );
+        if (!ok) return null;
+
+        const user = await db.user.findUnique({ where: { email } });
+        if (!user || user.banned) return null;
 
         return user;
       },

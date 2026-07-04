@@ -25,6 +25,10 @@ export const env = createEnv({
     // Optional at app startup so a missing backend URL cannot take down the
     // entire frontend. YouTube jobs report a targeted configuration error.
     DOWNLOAD_VIDEO_ENDPOINT: z.string().url().optional(),
+    // Fast, download-free duration lookup used to gate credits before the
+    // full download starts. Optional — falls back to the old minimum-credit
+    // gate if unset, rather than blocking YouTube jobs entirely.
+    YOUTUBE_DURATION_ENDPOINT: z.string().url().optional(),
     PROCESS_VIDEO_ENDPOINT_AUTH: z.string(),
     STRIPE_SECRET_KEY: z.string(),
     STRIPE_SMALL_CREDIT_PACK: z.string(),
@@ -38,6 +42,13 @@ export const env = createEnv({
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     YT_DLP_PATH: z.string().optional(),
     YT_DLP_PROXY: z.string().optional(),
+    // Optional so the app runs without email configured — sends are
+    // logged instead of dispatched until a real key is added.
+    RESEND_API_KEY: z.string().optional(),
+    EMAIL_FROM: z.string().default("ClipCast <onboarding@resend.dev>"),
+    SMTP_HOST: z.string().optional(),
+    SMTP_USER: z.string().optional(),
+    SMTP_PASSWORD: z.string().optional(),
   },
 
   /**
@@ -66,6 +77,7 @@ export const env = createEnv({
     AUTH_DISCORD_SECRET: process.env.AUTH_DISCORD_SECRET,
     PROCESS_VIDEO_ENDPOINT: process.env.PROCESS_VIDEO_ENDPOINT,
     DOWNLOAD_VIDEO_ENDPOINT: process.env.DOWNLOAD_VIDEO_ENDPOINT,
+    YOUTUBE_DURATION_ENDPOINT: process.env.YOUTUBE_DURATION_ENDPOINT,
     PROCESS_VIDEO_ENDPOINT_AUTH: process.env.PROCESS_VIDEO_ENDPOINT_AUTH,
     NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:
       process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
@@ -81,6 +93,11 @@ export const env = createEnv({
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
     YT_DLP_PATH: process.env.YT_DLP_PATH,
     YT_DLP_PROXY: process.env.YT_DLP_PROXY,
+    RESEND_API_KEY: process.env.RESEND_API_KEY,
+    EMAIL_FROM: process.env.EMAIL_FROM,
+    SMTP_HOST: process.env.SMTP_HOST,
+    SMTP_USER: process.env.SMTP_USER,
+    SMTP_PASSWORD: process.env.SMTP_PASSWORD,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially
