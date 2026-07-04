@@ -137,8 +137,13 @@ model UploadedFile {
     status String @default("queued") // processing, processed, no credits, failed
     clipMode String? @default("qa")
     isPreview Boolean? @default(false)
-    duration    Int?     
-    errorMessage String?  
+    duration    Int?
+    errorMessage String?
+    // Human-readable record of which model/service handled each stage of this
+    // job (e.g. "WhisperX large-v2 (transcription) · Gemini 2.5 Flash 8/9
+    // chunk(s) (moments), HF fallback Qwen/Qwen2.5-7B-Instruct 1/9 · TalkNet
+    // ASD (speaker detection)"). Built in clipcast-backend/apps/processor.
+    processingSummary String?
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
 
