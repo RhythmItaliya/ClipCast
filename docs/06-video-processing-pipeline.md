@@ -114,15 +114,97 @@ Rules:
 """,
     # "educational": ..., "motivational": ..., "highlights": ..., "all": ...
 }
+```
 
+WhisperX's raw output is one JSON object per single word, which is fine for a
+20-30 minute podcast but is a bad shape to hand Gemini once a source runs
+2-4 hours: tens of thousands of word entries bloat the prompt with repeated
+`start`/`end`/`word` keys, and the model has to reconstruct sentences itself
+before it can even apply the "match sentence boundaries" rule. Two things fix
+this and make moment selection scale with video duration instead of failing
+silently on long ones:
+
+1. **Group words into sentences first** (`_build_sentence_transcript()`),
+   using punctuation as the natural break, falling back to a fixed word count
+   if a run of words never hits one. This is both far more compact and a
+   better fit for the "sentence boundaries" instruction.
+2. **Window the sentence transcript into fixed-length time chunks**
+   (`_chunk_sentences()`, 20 minutes of source per chunk) and call Gemini once
+   per chunk instead of once per whole video. A 20-30 minute podcast is one
+   chunk, unchanged from before. A 4-hour podcast becomes about a dozen
+   chunks, each one small and fast, so the call never grows unbounded with
+   the source length:
+
+```python
     @modal.method()
     def identify_moments(self, transcript, clip_mode="qa"):
         prompt = CLIP_MODE_PROMPTS.get(clip_mode, CLIP_MODE_PROMPTS["qa"])
-        response = self.gemini_client.models.generate_content(
-            model="gemini-2.5-flash", contents=prompt + str(transcript))
-        # strip ```json fences, repair truncated JSON, json.loads() -> list or []
-        return json.dumps(_clean_and_validate(response.text) or [])
+        sentences = _build_sentence_transcript(transcript)
+        chunks = _chunk_sentences(sentences)  # ~20 min of source per chunk
+
+        # thinking_budget=0: Gemini 2.5's extended-reasoning tokens were
+        # eating into the fixed output budget on long transcripts, sometimes
+        # leaving no room for the actual JSON and truncating it mid-object.
+        config = genai_types.GenerateContentConfig(
+            max_output_tokens=8192,
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+        )
+
+        all_moments = []
+        for chunk in chunks:
+            response = self.gemini_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt + json.dumps(chunk),
+                config=config,
+            )
+            # strip ```json fences, repair truncated JSON, json.loads() -> list or []
+            moments = _clean_and_validate(response.text)
+            source = "gemini" if moments is not None else "none"
+            if moments is None:
+                # Gemini errored or the response wasn't valid JSON for this
+                # chunk. Rather than losing it entirely, retry the same
+                # chunk on a resident Hugging Face model.
+                hf_model, hf_tokenizer = self._get_hf_fallback()
+                hf_raw = _generate_with_hf(hf_model, hf_tokenizer, prompt + json.dumps(chunk))
+                moments = _clean_and_validate(hf_raw)
+                source = "huggingface" if moments is not None else "none"
+            if moments:
+                all_moments.extend(moments)
+            chunk_sources.append(source)  # tracked for the job's processing summary
+        return json.dumps({"moments": all_moments, "moment_selection_summary": {...}})
 ```
+
+## Tracking which model actually handled a job
+
+Gemini succeeds for the overwhelming majority of chunks, so the Hugging Face
+model is loaded lazily (`_get_hf_fallback()`, first call only) rather than
+kept resident from the start, since there's no point paying its VRAM and load-time cost
+on every request when it almost never runs. It's `Qwen/Qwen2.5-7B-Instruct`,
+loaded plain in bf16, not AWQ-quantized: the `autoawq` package needs
+`transformers>=4.45` and `torch>=2.4`, both newer than the
+`transformers==4.39.3` / `torch==2.2.2` this image already pins for
+WhisperX, so quantizing here would force a version bump that risks breaking
+transcription. bf16 costs more VRAM (about 15GB instead of about 5GB for
+4-bit) but that's still comfortable headroom on the L40S's 48GB, and
+`transformers==4.39.3` already ships `Qwen2ForCausalLM` (added in 4.37), so
+no extra package install is needed for the fallback at all. (An earlier
+version of this file mentioned a 72B model over vllm; that was never
+actually implemented, and would have needed 40GB+ of VRAM on its own, tight
+alongside WhisperX on the same card, plus vllm's own conflicting torch pins.)
+
+Every job records which service handled each of its stages, as a plain
+string on `UploadedFile.processingSummary`, e.g.:
+
+```
+WhisperX large-v2 (transcription) · Gemini 2.5 Flash 8/9 chunk(s) (moments),
+HF fallback Qwen/Qwen2.5-7B-Instruct 1/9 · TalkNet ASD (speaker detection)
+```
+
+Built in `process_video()` from `identify_moments()`'s per-chunk
+`moment_selection_summary` plus the always-on transcription/speaker-detection
+stages, returned to the frontend as `processing_summary`, and stored by the
+`update-exact-duration` Inngest step. The dashboard queue table and the admin
+jobs table both show it as a tooltip on the status badge.
 
 **Step 5: the public endpoint** ties it together: download from S3,
 transcribe, pick moments, render each one (fast preview crop or full
@@ -143,7 +225,8 @@ filenames by listing the S3 bucket):
         boto3.client("s3").download_file(os.environ["S3_BUCKET_NAME"], request.s3_key, str(video_path))
 
         transcript_json = self.transcribe_video.local(base_dir, video_path)
-        moments = json.loads(self.identify_moments.local(transcript_json, request.clip_mode))
+        parsed = json.loads(self.identify_moments.local(transcript_json, request.clip_mode))
+        moments = parsed["moments"]
 
         clip_records = []
         for i, m in enumerate(moments):
