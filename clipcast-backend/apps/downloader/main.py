@@ -40,6 +40,10 @@ class DownloadVideoRequest(BaseModel):
     call_id: str | None = None
 
 
+class DurationRequest(BaseModel):
+    youtube_url: str
+
+
 PROXY_TOOL_DIR = "/opt/yt-dlp-proxy"
 # main.py writes proxy.json to the PARENT of its own directory.
 LOCAL_PROXY_JSON = pathlib.Path("/opt/proxy.json")
@@ -316,6 +320,67 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str):
         }
     finally:
         shutil.rmtree(base_dir, ignore_errors=True)
+
+
+@app.function(
+    cpu=0.5,
+    memory=512,
+    timeout=45,
+    max_containers=10,
+    scaledown_window=60,
+    secrets=[modal.Secret.from_name("clipcast-secret")],
+    volumes={str(VOLUME_MOUNT): proxy_volume},
+)
+@modal.fastapi_endpoint(method="POST")
+def get_youtube_duration(
+    request: DurationRequest,
+    token: HTTPAuthorizationCredentials = Depends(auth_scheme),
+):
+    """Fast, download-free duration lookup so the credit gate can see a
+    video's real length before committing to the full download+GPU
+    pipeline — a 4-hour video should never start on a 20-credit balance
+    just because duration was unknown until after downloading it.
+
+    Uses yt-dlp's --skip-download metadata fetch (no video bytes pulled),
+    tried through only the first few ranked proxies — this is a best-effort
+    estimate, not the full retry budget of a real download. A caller should
+    treat duration=0 as "couldn't estimate" and fall back to the old
+    minimum-credit gate rather than blocking the job over a metadata hiccup.
+    """
+    if token.credentials != os.environ["PROCESS_VIDEO_ENDPOINT_AUTH"]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    paid_proxy = os.environ.get("YT_DLP_PROXY", "").strip()
+    proxies = [paid_proxy] if paid_proxy else _load_free_proxies()[:3]
+
+    for attempt, proxy in enumerate(proxies, start=1):
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "yt_dlp",
+                    "--proxy", proxy,
+                    "--js-runtimes", "deno",
+                    "--no-playlist",
+                    "--skip-download",
+                    "--print", "duration",
+                    request.youtube_url,
+                ],
+                capture_output=True, text=True, timeout=20,
+            )
+            lines = (result.stdout or "").strip().splitlines()
+            duration = float(lines[-1]) if lines else 0.0
+            if result.returncode == 0 and duration > 0:
+                return {"duration": duration}
+            print(f"Duration probe attempt {attempt}: no usable output ({result.stderr[-200:] if result.stderr else 'empty'})")
+        except Exception as err:
+            print(f"Duration probe attempt {attempt} failed: {err}")
+            continue
+
+    return {"duration": 0}
 
 
 @app.function(

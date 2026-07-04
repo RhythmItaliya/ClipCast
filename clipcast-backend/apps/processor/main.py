@@ -10,6 +10,7 @@ import time
 import uuid
 import boto3
 import cv2
+from PIL import ImageFont
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -125,11 +126,18 @@ Rules:
 
 Transcript:
 """,
-    "all": """\
+    "others": """\
 This is a podcast video transcript. I need clips between 30-60 seconds long.
-Find the best short-form clips of ANY type — insightful questions and answers,
-motivational or emotional stories, educational lessons, and viral, quotable highlights.
-Pick the strongest, most self-contained moments regardless of category.
+Find compelling, self-contained moments that do NOT clearly fit any of these
+existing categories: Q&A (a question and its answer), Educational (a taught
+lesson/tip/framework), Motivational (an inspiring personal story or mindset
+shift), Highlights (a bold, surprising, or viral-worthy quote). Think about
+what ELSE makes a podcast worth clipping — funny banter, a debate/disagreement,
+an emotional confession, an interesting tangent, a specific story, industry
+gossip, a hot take, wordplay, etc. — and invent a short, fresh 1-3 word category
+name for each clip that actually describes it (e.g. "Funny Moment", "Hot Take",
+"Debate", "Confession", "Behind the Scenes") rather than reusing the four
+categories above.
 
 Rules:
 - Clips must not overlap.
@@ -138,14 +146,31 @@ Rules:
 - Include a short, punchy, clickable title for each clip (max 60 characters, no
   surrounding quotes) in a "title" field — this is shown to viewers, so make it
   a hook, not a description.
-- Output only JSON: [{"start": seconds, "end": seconds, "title": "..."}, ...]. Must be parseable by json.loads().
+- Include your invented category name (1-3 words, Title Case, no surrounding
+  quotes) in a "category" field.
+- Output only JSON: [{"start": seconds, "end": seconds, "title": "...", "category": "..."}, ...].
+  Must be parseable by json.loads().
 - Target 40-60 second clips.
-- Density: aim for roughly 1 high-quality clip per 5 minutes of podcast.
 - Exclude: greetings, thank-yous, farewells, and filler conversation.
 - If no valid clips exist output [].
 
 Transcript:
 """,
+}
+
+# Modes fanned out over when clip_mode == "all" — one full Gemini pass per
+# mode per chunk, so "All" actually surfaces a genuine mix across every
+# category instead of one blended call that empirically skews toward
+# whichever pattern (usually Q&A) is most mechanically easy to spot.
+ALL_FANOUT_MODES = ["qa", "educational", "motivational", "highlights", "others"]
+
+# Display name for each fixed mode's own category label (the "others" mode is
+# the only one where Gemini invents its own — see the prompt above).
+MODE_CATEGORY_LABELS = {
+    "qa": "Q&A",
+    "educational": "Educational",
+    "motivational": "Motivational",
+    "highlights": "Highlights",
 }
 
 image = (
@@ -184,8 +209,8 @@ image = (
     ])
     .run_commands([
         "mkdir -p /usr/share/fonts/truetype/custom",
-        "wget -O /usr/share/fonts/truetype/custom/Anton-Regular.ttf "
-        "    https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf",
+        "wget -O /usr/share/fonts/truetype/custom/Poppins-Black.ttf "
+        "    https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Black.ttf",
         "fc-cache -f -v",
     ])
     # Mount model volumes outside paths that image-build dependencies may
@@ -307,16 +332,56 @@ def rgb_to_ass_bgr(r, g, b):
     return f"{b:02X}{g:02X}{r:02X}"
 
 
-# ClipCast brand indigo (#6366F1) — the karaoke-highlight color for the
-# currently-spoken word in burned captions.
-HIGHLIGHT_COLOR_BGR = rgb_to_ass_bgr(99, 102, 241)
+# Lighter indigo from the same family as the site's #4F46E5 brand token. It
+# remains readable against the dark caption panel after video compression.
+HIGHLIGHT_COLOR_BGR = rgb_to_ass_bgr(129, 140, 248)
+
+CAPTION_FONT_PATH = "/usr/share/fonts/truetype/custom/Poppins-Black.ttf"
+
+
+def _layout_caption_lines(words, fontsize, max_line_width):
+    """Greedily wraps `words` into lines that fit `max_line_width` pixels,
+    using the exact font/size the caption is rendered in — so each word's
+    on-screen position can be computed precisely instead of relying on
+    libass's own automatic wrapping (which doesn't expose per-word pixel
+    positions, and so can't be used to place a background box behind just
+    the active word).
+
+    Returns a list of lines; each line is a list of
+    (word_index, x_offset_within_line, word_width) tuples, plus the line's
+    total width for centering.
+    """
+    font = ImageFont.truetype(CAPTION_FONT_PATH, fontsize)
+    space_width = font.getlength(" ")
+
+    lines = []
+    current = []
+    current_x = 0.0
+
+    for i, word in enumerate(words):
+        word_width = font.getlength(word)
+        prefix = space_width if current else 0.0
+        if current and current_x + prefix + word_width > max_line_width:
+            lines.append({"words": current, "total_width": current_x})
+            current = []
+            current_x = 0.0
+            prefix = 0.0
+        x_offset = current_x + prefix
+        current.append((i, x_offset, word_width))
+        current_x = x_offset + word_width
+
+    if current:
+        lines.append({"words": current, "total_width": current_x})
+
+    return lines
+
 
 # Subtle, semi-transparent corner wordmark — sized and faded like a real
 # Reels/TikTok creator watermark rather than a bold solid label. Shared by
 # the full-quality caption render and the fast preview path below.
 WATERMARK_DRAWTEXT = (
     "drawtext=text='ClipCast':"
-    "fontfile=/usr/share/fonts/truetype/custom/Anton-Regular.ttf:"
+    "fontfile=/usr/share/fonts/truetype/custom/Poppins-Black.ttf:"
     "x=w-tw-36:y=36:fontsize=42:fontcolor=white@0.55:"
     "shadowcolor=black@0.35:shadowx=1:shadowy=1"
 )
@@ -330,7 +395,7 @@ def create_thumbnail(video_path, output_path, at_seconds):
     )
 
 
-def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end, clip_video_path, output_path, max_words=5):
+def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end, clip_video_path, output_path, max_words=4):
     temp_dir = os.path.dirname(output_path)
     subtitle_path = os.path.join(temp_dir, "temp_subtitles.ass")
 
@@ -340,7 +405,10 @@ def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end, clip
 
     # Each chunk is a list of (word, start_rel, end_rel) — kept per-word
     # (not joined into one string) so every word can get its own karaoke-timed
-    # highlight event below.
+    # highlight event below. Chunk on sentence boundaries (., ?, !) so the
+    # full sentence is on screen at once — not fixed 5-word buckets — with
+    # max_words only as a safety cap against a run-on sentence with no
+    # punctuation overflowing the frame.
     chunks = []
     current_chunk = []
 
@@ -354,52 +422,106 @@ def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end, clip
         end_rel = max(0.0, seg_end - clip_start)
         if end_rel <= 0:
             continue
-        if len(current_chunk) >= max_words:
+        current_chunk.append((word, start_rel, end_rel))
+        ends_sentence = word[-1:] in ".?!" or len(current_chunk) >= max_words
+        if ends_sentence:
             chunks.append(current_chunk)
             current_chunk = []
-        current_chunk.append((word, start_rel, end_rel))
 
     if current_chunk:
         chunks.append(current_chunk)
 
+    PLAY_RES_X = 1080
+    PLAY_RES_Y = 1920
+    FONT_SIZE = 120
+    MARGIN_L = 60
+    MARGIN_R = 60
+    # Raised well off the bottom edge (was 50px) so captions clear a
+    # platform's own bottom UI (like/comment/share rail) instead of hugging
+    # the very bottom of the frame.
+    MARGIN_V = 320
     subs = pysubs2.SSAFile()
-    subs.info["WrapStyle"] = 0
     subs.info["ScaledBorderAndShadow"] = "yes"
-    subs.info["PlayResX"] = 1080
-    subs.info["PlayResY"] = 1920
+    subs.info["PlayResX"] = PLAY_RES_X
+    subs.info["PlayResY"] = PLAY_RES_Y
     subs.info["ScriptType"] = "v4.00+"
 
     style_name = "Default"
     new_style = pysubs2.SSAStyle()
-    new_style.fontname = "Anton"
-    new_style.fontsize = 140
+    new_style.fontname = "Poppins Black"
+    new_style.fontsize = FONT_SIZE
     new_style.primarycolor = pysubs2.Color(255, 255, 255)
-    new_style.outline = 3.0
-    # No drop shadow — a heavy black shadow/box reads as amateur. The
-    # thicker outline above keeps text readable over busy footage without it.
+    # A stable translucent panel follows the complete caption. This is calmer
+    # than a large moving block and cannot drift away from the text because
+    # libass measures and renders both together.
+    new_style.borderstyle = 3
+    new_style.outline = 14.0
+    new_style.outlinecolor = pysubs2.Color(18, 24, 38, 72)
     new_style.shadow = 0.0
     new_style.shadowcolor = pysubs2.Color(0, 0, 0, 0)
     new_style.alignment = 2
-    new_style.marginl = 50
-    new_style.marginr = 50
-    new_style.marginv = 50
+    new_style.marginl = MARGIN_L
+    new_style.marginr = MARGIN_R
+    new_style.marginv = MARGIN_V
     new_style.spacing = 0.0
     subs.styles[style_name] = new_style
 
-    # Karaoke-style highlight: one event per WORD (not per chunk), spanning
-    # exactly that word's spoken duration, with the active word colored
-    # (ClipCast brand indigo) and the rest of the chunk left white.
+    highlight_style_name = "WordHighlight"
+    highlight_style = pysubs2.SSAStyle()
+    highlight_style.fontname = new_style.fontname
+    highlight_style.fontsize = FONT_SIZE
+    highlight_style.primarycolor = new_style.primarycolor
+    highlight_style.borderstyle = 1
+    highlight_style.outline = 0.0
+    highlight_style.shadow = 0.0
+    highlight_style.alignment = new_style.alignment
+    highlight_style.marginl = MARGIN_L
+    highlight_style.marginr = MARGIN_R
+    highlight_style.marginv = MARGIN_V
+    highlight_style.spacing = 0.0
+    subs.styles[highlight_style_name] = highlight_style
+
+    max_line_width = PLAY_RES_X - MARGIN_L - MARGIN_R
+
     for chunk in chunks:
         words = [w for w, _, _ in chunk]
-        for i, (word, start_rel, end_rel) in enumerate(chunk):
-            styled_words = [
-                f"{{\\c&H{HIGHLIGHT_COLOR_BGR}&}}{w}{{\\c&HFFFFFF&}}" if j == i else w
-                for j, w in enumerate(words)
-            ]
+        lines = _layout_caption_lines(words, FONT_SIZE, max_line_width)
+        # The stable base event owns both the white text and dark panel.
+        chunk_start = chunk[0][1]
+        chunk_end = chunk[-1][2]
+        line_text = "\\N".join(
+            " ".join(words[i] for i, _, _ in line["words"]) for line in lines
+        )
+        subs.events.append(pysubs2.SSAEvent(
+            start=pysubs2.make_time(s=chunk_start),
+            end=pysubs2.make_time(s=chunk_end),
+            text=line_text, style=style_name,
+            layer=0,
+        ))
+
+        # Overlay the identical caption while each word is spoken, changing
+        # only that word to brand indigo. Matching text and wrapping keeps the
+        # panel stationary and eliminates detached or empty highlight boxes.
+        for active_index, (_, start_rel, end_rel) in enumerate(chunk):
+            highlighted_lines = []
+            for line in lines:
+                rendered_words = []
+                for word_index, _, _ in line["words"]:
+                    word = words[word_index]
+                    if word_index == active_index:
+                        word = (
+                            f"{{\\c&H{HIGHLIGHT_COLOR_BGR}&}}{word}"
+                            "{\\c&HFFFFFF&}"
+                        )
+                    rendered_words.append(word)
+                highlighted_lines.append(" ".join(rendered_words))
+
             subs.events.append(pysubs2.SSAEvent(
                 start=pysubs2.make_time(s=start_rel),
                 end=pysubs2.make_time(s=end_rel),
-                text=' '.join(styled_words), style=style_name,
+                text="\\N".join(highlighted_lines),
+                style=highlight_style_name,
+                layer=1,
             ))
 
     subs.save(subtitle_path)
@@ -523,7 +645,7 @@ def process_clip(base_dir, original_video_path, s3_key, start_time, end_time, cl
     create_vertical_video(tracks, scores, pyframes_path, pyavi_path, audio_path, vertical_mp4_path)
     print(f"Clip {clip_index} vertical video creation time: {time.time() - cvv_start:.2f} seconds")
 
-    create_subtitles_with_ffmpeg(transcript_segments, start_time, end_time, vertical_mp4_path, subtitle_output_path, max_words=5)
+    create_subtitles_with_ffmpeg(transcript_segments, start_time, end_time, vertical_mp4_path, subtitle_output_path)
 
     thumbnail_path = clip_dir / "thumb.jpg"
     create_thumbnail(subtitle_output_path, thumbnail_path, at_seconds=min(1.0, duration * 0.15))
@@ -747,8 +869,12 @@ class ClipCast:
         handles a 20-minute one: each call stays small and fast instead of
         one call whose input and required output both grow with the video's
         length.
+
+        clip_mode == "all" fans out over every mode in ALL_FANOUT_MODES (one
+        full Gemini pass per mode per chunk) instead of one blended prompt,
+        so "All" actually returns a genuine mix of categories — each moment
+        comes back tagged with the mode/category it was found under.
         """
-        prompt = CLIP_MODE_PROMPTS.get(clip_mode, CLIP_MODE_PROMPTS["qa"])
 
         def _clean_and_validate(raw: str | None) -> list | None:
             """Strip code fences, parse JSON, return list or None on failure."""
@@ -796,56 +922,98 @@ class ClipCast:
             thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
         )
 
+        def _run_mode(mode: str) -> tuple[list, list[str]]:
+            """Runs one mode's prompt across every chunk, tagging each
+            returned moment with this mode's category label (or, for
+            "others", whatever category Gemini itself invented)."""
+            prompt = CLIP_MODE_PROMPTS.get(mode, CLIP_MODE_PROMPTS["qa"])
+            mode_moments: list = []
+            sources: list[str] = []
+
+            for chunk_index, chunk in enumerate(chunks):
+                chunk_prompt = prompt + json.dumps(chunk)
+                moments = None
+                source = "none"
+
+                try:
+                    response = self.gemini_client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=chunk_prompt,
+                        config=config,
+                    )
+                    gemini_raw = response.text
+                    print(
+                        f"[{mode}] Gemini chunk {chunk_index + 1}/{len(chunks)} response "
+                        f"(first 200 chars): {(gemini_raw or '')[:200]!r}"
+                    )
+                    moments = _clean_and_validate(gemini_raw)
+                    if moments is not None:
+                        source = "gemini"
+                    elif gemini_raw:
+                        print(f"[{mode}] Gemini chunk {chunk_index + 1} returned non-JSON: {gemini_raw[:300]!r}")
+                except Exception as err:
+                    print(f"[{mode}] Gemini failed on chunk {chunk_index + 1}/{len(chunks)}: {err}")
+
+                if moments is None:
+                    try:
+                        hf_model, hf_tokenizer = self._get_hf_fallback()
+                        hf_raw = _generate_with_hf(hf_model, hf_tokenizer, chunk_prompt)
+                        print(
+                            f"[{mode}] HF fallback chunk {chunk_index + 1}/{len(chunks)} response "
+                            f"(first 200 chars): {(hf_raw or '')[:200]!r}"
+                        )
+                        moments = _clean_and_validate(hf_raw)
+                        if moments is not None:
+                            source = "huggingface"
+                        elif hf_raw:
+                            print(f"[{mode}] HF fallback chunk {chunk_index + 1} returned non-JSON: {hf_raw[:300]!r}")
+                    except Exception as err:
+                        print(f"[{mode}] HF fallback failed on chunk {chunk_index + 1}/{len(chunks)}: {err}")
+
+                if moments:
+                    for m in moments:
+                        if isinstance(m, dict):
+                            # Fixed modes get their own display label; "others"
+                            # keeps whatever category Gemini invented for that
+                            # specific moment (falling back to "Others" if it
+                            # left the field out).
+                            m["category"] = MODE_CATEGORY_LABELS.get(
+                                mode, str(m.get("category") or "Others").strip()[:40]
+                            )
+                            m["mode"] = mode
+                    mode_moments.extend(moments)
+                sources.append(source)
+
+            return mode_moments, sources
+
+        def _overlaps(a: dict, b: dict, threshold: float = 0.5) -> bool:
+            """True if two moments share more than `threshold` of the
+            shorter one's duration — used to drop near-duplicate moments
+            that different modes both flagged over the same stretch of
+            transcript when fanning out over every mode for "All"."""
+            try:
+                a_start, a_end = float(a["start"]), float(a["end"])
+                b_start, b_end = float(b["start"]), float(b["end"])
+            except (KeyError, TypeError, ValueError):
+                return False
+            overlap = min(a_end, b_end) - max(a_start, b_start)
+            if overlap <= 0:
+                return False
+            shorter = min(a_end - a_start, b_end - b_start)
+            return shorter > 0 and (overlap / shorter) > threshold
+
         all_moments: list = []
-        # One entry per chunk: "gemini", "huggingface", or "none" (both failed).
-        # This is what lets a job report which model actually produced its
-        # clips, instead of that being invisible once Gemini and the fallback
-        # are both in play.
         chunk_sources: list[str] = []
 
-        for chunk_index, chunk in enumerate(chunks):
-            chunk_prompt = prompt + json.dumps(chunk)
-            moments = None
-            source = "none"
-
-            try:
-                response = self.gemini_client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=chunk_prompt,
-                    config=config,
-                )
-                gemini_raw = response.text
-                print(
-                    f"Gemini chunk {chunk_index + 1}/{len(chunks)} response "
-                    f"(first 200 chars): {(gemini_raw or '')[:200]!r}"
-                )
-                moments = _clean_and_validate(gemini_raw)
-                if moments is not None:
-                    source = "gemini"
-                elif gemini_raw:
-                    print(f"Gemini chunk {chunk_index + 1} returned non-JSON: {gemini_raw[:300]!r}")
-            except Exception as err:
-                print(f"Gemini failed on chunk {chunk_index + 1}/{len(chunks)}: {err}")
-
-            if moments is None:
-                try:
-                    hf_model, hf_tokenizer = self._get_hf_fallback()
-                    hf_raw = _generate_with_hf(hf_model, hf_tokenizer, chunk_prompt)
-                    print(
-                        f"HF fallback chunk {chunk_index + 1}/{len(chunks)} response "
-                        f"(first 200 chars): {(hf_raw or '')[:200]!r}"
-                    )
-                    moments = _clean_and_validate(hf_raw)
-                    if moments is not None:
-                        source = "huggingface"
-                    elif hf_raw:
-                        print(f"HF fallback chunk {chunk_index + 1} returned non-JSON: {hf_raw[:300]!r}")
-                except Exception as err:
-                    print(f"HF fallback failed on chunk {chunk_index + 1}/{len(chunks)}: {err}")
-
-            if moments:
-                all_moments.extend(moments)
-            chunk_sources.append(source)
+        if clip_mode == "all":
+            for mode in ALL_FANOUT_MODES:
+                mode_moments, sources = _run_mode(mode)
+                chunk_sources.extend(sources)
+                for m in mode_moments:
+                    if isinstance(m, dict) and not any(_overlaps(m, existing) for existing in all_moments):
+                        all_moments.append(m)
+        else:
+            all_moments, chunk_sources = _run_mode(clip_mode)
 
         summary = {
             "total_chunks": len(chunks),
@@ -1062,7 +1230,8 @@ class ClipCast:
             if duration > 0 and end > duration + 1:
                 continue
             title = str(moment.get("title", "") or "").strip()[:80]
-            valid_moments.append({"start": start, "end": end, "title": title})
+            category = str(moment.get("category") or "").strip()[:40] or None
+            valid_moments.append({"start": start, "end": end, "title": title, "category": category})
             if len(valid_moments) == 12:
                 break
 
@@ -1084,6 +1253,12 @@ class ClipCast:
                         base_dir, video_path, request.s3_key,
                         moment["start"], moment["end"], index, transcript_segments, moment["title"]
                     )
+                # Per-clip category (e.g. "Q&A", "Educational", or an
+                # AI-invented "Others" label) — only meaningfully populated
+                # when the job ran in "all" mode; None otherwise, in which
+                # case the frontend already knows the single mode the whole
+                # job was submitted with.
+                record["category"] = moment.get("category")
                 clip_records.append(record)
                 clips_rendered += 1
             except subprocess.CalledProcessError as ffmpeg_err:
