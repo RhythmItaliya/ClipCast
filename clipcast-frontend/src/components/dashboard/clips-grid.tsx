@@ -4,16 +4,22 @@ import {
   ChevronDown,
   Clock,
   Download,
+  ExternalLink,
   Loader2,
   Play,
   Scissors,
   Trash2,
+  Upload,
   Video,
+  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { deleteClip, getClipUrl } from "~/actions/clips";
+import { uploadClipToYouTube } from "~/actions/youtube";
+import { YoutubeIcon } from "~/components/brand";
+import { useConfirm } from "~/components/ui/confirm-dialog";
 import {
   FRIENDLY_MESSAGES,
   getFriendlyErrorMessage,
@@ -28,6 +34,7 @@ export type ClipItem = {
   duration?: number | null;
   thumbnailUrl?: string | null;
   createdAt: string;
+  youtubeVideoId?: string | null;
 };
 
 /** Formats seconds as "m:ss" for the duration badge. */
@@ -52,15 +59,25 @@ const THUMB_GRADIENTS = [
   "from-lime-500 via-emerald-500 to-teal-500",
 ];
 
-export function ClipsGrid({ groups }: { groups: ClipGroup[] }) {
+export function ClipsGrid({
+  groups,
+  youtubeConnected = false,
+}: {
+  groups: ClipGroup[];
+  youtubeConnected?: boolean;
+}) {
   return (
     <section className="space-y-6">
       {groups.length === 0 ? (
         <EmptyState />
       ) : (
         <div className="space-y-4">
-          {groups.map((g, i) => (
-            <VideoGroupSection key={g.id} group={g} groupIndex={i} />
+          {groups.map((g) => (
+            <VideoGroupSection
+              key={g.id}
+              group={g}
+              youtubeConnected={youtubeConnected}
+            />
           ))}
         </div>
       )}
@@ -70,18 +87,18 @@ export function ClipsGrid({ groups }: { groups: ClipGroup[] }) {
 
 function VideoGroupSection({
   group,
-  groupIndex,
+  youtubeConnected,
 }: {
   group: ClipGroup;
-  groupIndex: number;
+  youtubeConnected: boolean;
 }) {
-  const [open, setOpen] = useState(groupIndex === 0);
+  const [open, setOpen] = useState(false);
   return (
     <div className="border-border bg-surface/40 rounded-3xl border">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="hover:bg-surface/60 flex w-full items-center justify-between gap-4 rounded-3xl px-5 py-4 text-left transition-colors"
+        className="hover:bg-surface-2 flex w-full cursor-pointer items-center justify-between gap-4 rounded-3xl px-5 py-4 text-left transition-colors"
       >
         <div className="flex min-w-0 items-center gap-3">
           <span className="bg-brand-soft text-brand grid size-10 shrink-0 place-items-center rounded-2xl">
@@ -104,9 +121,15 @@ function VideoGroupSection({
       </button>
 
       {open && (
-        <div className="border-border grid grid-cols-1 gap-4 border-t p-5 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="border-border grid grid-cols-2 gap-4 border-t p-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {group.clips.map((clip, i) => (
-            <ClipCard key={clip.id} clip={clip} source={group.title} index={i} />
+            <ClipCard
+              key={clip.id}
+              clip={clip}
+              source={group.title}
+              index={i}
+              youtubeConnected={youtubeConnected}
+            />
           ))}
         </div>
       )}
@@ -118,15 +141,29 @@ function ClipCard({
   clip,
   source,
   index,
+  youtubeConnected,
 }: {
   clip: ClipItem;
   source: string;
   index: number;
+  youtubeConnected: boolean;
 }) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState<"play" | "download" | "delete" | null>(
     null,
   );
+  const [postModalOpen, setPostModalOpen] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [postTitle, setPostTitle] = useState(clip.title);
+  const [postDescription, setPostDescription] = useState("");
+  const [postPrivacy, setPostPrivacy] = useState<
+    "public" | "unlisted" | "private"
+  >("public");
+  const [postError, setPostError] = useState<string | null>(null);
+  const [postedVideoId, setPostedVideoId] = useState(
+    clip.youtubeVideoId ?? null,
+  );
+  const confirm = useConfirm();
   const router = useRouter();
   const gradient = THUMB_GRADIENTS[index % THUMB_GRADIENTS.length]!;
 
@@ -183,7 +220,13 @@ function ClipCard({
 
   const handleDelete = async () => {
     if (loading) return;
-    if (!window.confirm("Delete this clip permanently?")) return;
+    const ok = await confirm({
+      title: "Delete this clip?",
+      description: "This clip will be permanently deleted.",
+      confirmLabel: "Delete clip",
+      destructive: true,
+    });
+    if (!ok) return;
     setLoading("delete");
     try {
       const res = await deleteClip(clip.id);
@@ -199,6 +242,37 @@ function ClipCard({
       });
     } finally {
       setLoading(null);
+    }
+  };
+
+  const handlePost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (posting) return;
+    if (isOffline()) {
+      setPostError(FRIENDLY_MESSAGES.offline);
+      return;
+    }
+    setPosting(true);
+    setPostError(null);
+    try {
+      const res = await uploadClipToYouTube(clip.id, {
+        title: postTitle,
+        description: postDescription || undefined,
+        privacyStatus: postPrivacy,
+      });
+      if (res.success) {
+        setPostedVideoId(res.videoId);
+        setPostModalOpen(false);
+        toast.success("Posted to YouTube!", {
+          description: "Your clip is now live on your channel.",
+        });
+      } else {
+        setPostError(res.error);
+      }
+    } catch (err) {
+      setPostError(getFriendlyErrorMessage(err));
+    } finally {
+      setPosting(false);
     }
   };
 
@@ -289,8 +363,117 @@ function ClipCard({
               <Trash2 className="size-3.5" />
             )}
           </button>
+          {youtubeConnected &&
+            (postedVideoId ? (
+              <a
+                href={`https://www.youtube.com/watch?v=${postedVideoId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="View on YouTube"
+                className="border-border text-brand hover:bg-brand-soft grid size-9 place-items-center rounded-lg border"
+              >
+                <ExternalLink className="size-3.5" />
+              </a>
+            ) : (
+              <button
+                onClick={() => setPostModalOpen(true)}
+                disabled={loading !== null}
+                title="Post to YouTube"
+                className="border-border text-muted-foreground hover:border-brand/40 hover:bg-brand-soft hover:text-brand grid size-9 place-items-center rounded-lg border disabled:opacity-50"
+              >
+                <YoutubeIcon className="size-3.5" />
+              </button>
+            ))}
         </div>
       </div>
+
+      {postModalOpen && (
+        <div
+          className="fixed inset-0 z-[200] grid place-items-center bg-black/50 p-4 backdrop-blur-sm"
+          onClick={() => !posting && setPostModalOpen(false)}
+        >
+          <form
+            onSubmit={handlePost}
+            onClick={(e) => e.stopPropagation()}
+            className="border-border bg-surface w-full max-w-sm rounded-3xl border p-6 shadow-xl"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-base font-semibold">
+                <YoutubeIcon className="text-brand size-4" /> Post to YouTube
+              </h2>
+              <button
+                type="button"
+                onClick={() => setPostModalOpen(false)}
+                disabled={posting}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium">Title</span>
+                <input
+                  value={postTitle}
+                  onChange={(e) => setPostTitle(e.target.value)}
+                  maxLength={100}
+                  required
+                  className="border-border bg-background focus:border-brand w-full rounded-xl border px-3 py-2 text-sm outline-none"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium">
+                  Description (optional)
+                </span>
+                <textarea
+                  value={postDescription}
+                  onChange={(e) => setPostDescription(e.target.value)}
+                  rows={3}
+                  className="border-border bg-background focus:border-brand w-full resize-none rounded-xl border px-3 py-2 text-sm outline-none"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium">
+                  Visibility
+                </span>
+                <select
+                  value={postPrivacy}
+                  onChange={(e) =>
+                    setPostPrivacy(
+                      e.target.value as "public" | "unlisted" | "private",
+                    )
+                  }
+                  className="border-border bg-background focus:border-brand w-full rounded-xl border px-3 py-2 text-sm outline-none"
+                >
+                  <option value="public">Public</option>
+                  <option value="unlisted">Unlisted</option>
+                  <option value="private">Private</option>
+                </select>
+              </label>
+
+              {postError && (
+                <p className="bg-destructive/10 text-destructive rounded-xl p-3 text-sm">
+                  {postError}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={posting}
+                className="bg-brand text-brand-foreground flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                {posting ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Upload className="size-4" />
+                )}
+                {posting ? "Posting…" : "Post to YouTube"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </article>
   );
 }

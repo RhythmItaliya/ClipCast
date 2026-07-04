@@ -124,7 +124,7 @@ function StatCard({
   return (
     <Link
       href={href}
-      className="border-border bg-surface/60 hover:bg-surface group rounded-3xl border p-5 transition-colors"
+      className="border-border bg-surface/60 hover:bg-surface-2 group rounded-3xl border p-5 transition-colors"
     >
       <div className="flex items-center justify-between">
         <span className="text-muted-foreground text-xs font-medium">{label}</span>
@@ -151,7 +151,7 @@ function QuickLink({
   return (
     <Link
       href={href}
-      className="border-border bg-background hover:bg-surface flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors"
+      className="border-border bg-background hover:bg-surface-2 flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors"
     >
       <span className="text-brand">{icon}</span>
       {label}

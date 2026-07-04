@@ -12,7 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { processYoutubeVideo } from "~/actions/generation";
 import { YoutubeIcon } from "~/components/brand";
@@ -21,34 +21,60 @@ import {
   getChannelVideos,
   getYouTubeAuthUrl,
   selectYouTubeChannel,
+  setYouTubeAutoClip,
   type PendingYouTubeChannel,
   type YouTubeVideo,
 } from "~/actions/youtube";
-import { getFriendlyErrorMessage, isOffline, FRIENDLY_MESSAGES } from "~/lib/errors";
+import {
+  getFriendlyErrorMessage,
+  isOffline,
+  FRIENDLY_MESSAGES,
+} from "~/lib/errors";
+
+const channelVideoCache = new Map<string, YouTubeVideo[]>();
 
 export function YouTubeChannelClient({
   isConnected,
+  channelId,
   channelName,
   connected,
   oauthError,
   pendingChannels,
+  autoClipEnabled,
 }: {
   isConnected: boolean;
+  channelId: string | null;
   channelName: string | null;
   connected: boolean;
   oauthError: string | null;
   pendingChannels: PendingYouTubeChannel[];
+  autoClipEnabled: boolean;
 }) {
   const router = useRouter();
-  const [videos, setVideos] = useState<YouTubeVideo[]>([]);
+  const [connectionActive, setConnectionActive] = useState(isConnected);
+  const [videos, setVideos] = useState<YouTubeVideo[]>(() =>
+    channelId ? (channelVideoCache.get(channelId) ?? []) : [],
+  );
   const [loadingVideos, setLoadingVideos] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
-  const [selectingChannelId, setSelectingChannelId] = useState<string | null>(null);
+  const [selectingChannelId, setSelectingChannelId] = useState<string | null>(
+    null,
+  );
+  const [autoClip, setAutoClip] = useState(autoClipEnabled);
+  const [savingAutoClip, setSavingAutoClip] = useState(false);
   const hasPendingChannels = pendingChannels.length > 0;
+  const initialFetchStarted = useRef(false);
+  const oauthNoticeShown = useRef(false);
+  const videoRequestSequence = useRef(0);
+
+  useEffect(() => setConnectionActive(isConnected), [isConnected]);
 
   useEffect(() => {
+    if (oauthNoticeShown.current) return;
+    if (connected || oauthError) oauthNoticeShown.current = true;
     if (connected) toast.success("YouTube channel connected!");
     if (oauthError) {
       let title = "Connection failed";
@@ -61,9 +87,25 @@ export function YouTubeChannelClient({
       } else if (oauthError === "api_error") {
         title = "Couldn't verify your channel";
         desc =
-          "We reached Google but couldn't confirm your channel just now. This is usually temporary, please try connecting again in a moment.";
+          "Google returned an unexpected channel lookup error. Try reconnecting once; if it repeats, check the local server log for the exact Google response.";
+      } else if (oauthError === "api_disabled") {
+        title = "YouTube API is not enabled for this OAuth client";
+        desc =
+          "Enable YouTube Data API v3 in the exact Google Cloud project that owns this OAuth Client ID, wait a few minutes, then reconnect.";
+      } else if (oauthError === "insufficient_scope") {
+        title = "YouTube permission was not granted";
+        desc =
+          "Remove ClipCast/Test from your Google Account connections, reconnect, and approve all requested YouTube permissions.";
+      } else if (oauthError === "quota_exceeded") {
+        title = "YouTube API quota exceeded";
+        desc = "Wait for Google's daily quota reset, then reconnect.";
+      } else if (oauthError === "youtube_account_required") {
+        title = "No YouTube channel on this Google account";
+        desc =
+          "Create a YouTube channel for this Google account, or reconnect using the Google account that owns your channel.";
       } else if (oauthError === "oauth_failed") {
-        desc = "Failed to securely exchange authentication tokens. Please try connecting again.";
+        desc =
+          "Failed to securely exchange authentication tokens. Please try connecting again.";
       } else if (oauthError === "access_denied") {
         desc = "You denied access to your YouTube channel.";
       }
@@ -102,27 +144,44 @@ export function YouTubeChannelClient({
     }
   }
 
-  const fetchVideos = useCallback(async () => {
-    setLoadingVideos(true);
-    try {
-      const result = await getChannelVideos(12);
-      if (result.success && result.videos) {
-        setVideos(result.videos);
-      } else {
-        toast.error("Failed to load videos", { description: result.error });
+  const fetchVideos = useCallback(
+    async (force = false) => {
+      if (!channelId) return;
+      const cached = channelVideoCache.get(channelId);
+      if (!force && cached) {
+        setVideos(cached);
+        return;
       }
-    } catch (e) {
-      toast.error("Failed to load videos", {
-        description: getFriendlyErrorMessage(e),
-      });
-    } finally {
-      setLoadingVideos(false);
-    }
-  }, []);
+      const requestSequence = ++videoRequestSequence.current;
+      setLoadingVideos(true);
+      setVideoError(null);
+      try {
+        const result = await getChannelVideos(12);
+        if (requestSequence !== videoRequestSequence.current) return;
+        if (result.success && result.videos) {
+          setVideos(result.videos);
+          channelVideoCache.set(channelId, result.videos);
+        } else {
+          setVideoError(result.error ?? "Could not load channel videos.");
+        }
+      } catch (e) {
+        if (requestSequence !== videoRequestSequence.current) return;
+        setVideoError(getFriendlyErrorMessage(e));
+      } finally {
+        if (requestSequence === videoRequestSequence.current) {
+          setLoadingVideos(false);
+        }
+      }
+    },
+    [channelId],
+  );
 
   useEffect(() => {
-    if (isConnected) void fetchVideos();
-  }, [isConnected, fetchVideos]);
+    if (connectionActive && !initialFetchStarted.current) {
+      initialFetchStarted.current = true;
+      void fetchVideos();
+    }
+  }, [connectionActive, fetchVideos]);
 
   async function handleConnect() {
     if (isOffline()) {
@@ -143,8 +202,12 @@ export function YouTubeChannelClient({
     setDisconnecting(true);
     try {
       await disconnectYouTubeChannel();
+      videoRequestSequence.current += 1;
+      if (channelId) channelVideoCache.delete(channelId);
       setVideos([]);
+      setConnectionActive(false);
       toast.success("YouTube channel disconnected.");
+      router.refresh();
     } catch (e) {
       toast.error("Could not disconnect", {
         description: getFriendlyErrorMessage(e),
@@ -179,6 +242,31 @@ export function YouTubeChannelClient({
     }
   }
 
+  async function handleAutoClipToggle() {
+    if (!connectionActive || savingAutoClip) return;
+    const next = !autoClip;
+    setAutoClip(next);
+    setSavingAutoClip(true);
+    try {
+      const result = await setYouTubeAutoClip(next);
+      if (!result.success) {
+        setAutoClip(!next);
+        toast.error("Could not update automation", {
+          description: result.error,
+        });
+        return;
+      }
+      toast.success(next ? "Auto-clip enabled" : "Auto-clip paused");
+    } catch (e) {
+      setAutoClip(!next);
+      toast.error("Could not update automation", {
+        description: getFriendlyErrorMessage(e),
+      });
+    } finally {
+      setSavingAutoClip(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       {/* Channel connection */}
@@ -190,7 +278,7 @@ export function YouTubeChannelClient({
             </div>
             <div className="min-w-0">
               <h2 className="truncate text-lg font-semibold">
-                {isConnected && channelName
+                {connectionActive && channelName
                   ? channelName
                   : "Channel connection"}
               </h2>
@@ -202,32 +290,34 @@ export function YouTubeChannelClient({
           </div>
           <span
             className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold tracking-widest uppercase ring-1 ${
-              isConnected
+              connectionActive
                 ? "bg-brand-soft text-brand ring-brand/20"
                 : "bg-surface-2 text-muted-foreground ring-border"
             }`}
           >
-            {isConnected ? "Connected" : "Not connected"}
+            {connectionActive ? "Connected" : "Not connected"}
           </span>
         </div>
         {!hasPendingChannels && (
           <button
-            onClick={isConnected ? handleDisconnect : handleConnect}
+            onClick={connectionActive ? handleDisconnect : handleConnect}
             disabled={connecting || disconnecting}
             className={`mt-6 flex w-full items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-60 sm:w-auto ${
-              isConnected
+              connectionActive
                 ? "border-border bg-surface text-foreground border"
                 : "bg-brand text-brand-foreground"
             }`}
           >
             {connecting || disconnecting ? (
               <Loader2 className="size-4 animate-spin" />
-            ) : isConnected ? (
+            ) : connectionActive ? (
               <LogOut className="size-4" />
             ) : (
               <YoutubeIcon className="size-4" />
             )}
-            {isConnected ? "Disconnect Channel" : "Connect YouTube Channel"}
+            {connectionActive
+              ? "Disconnect Channel"
+              : "Connect YouTube Channel"}
           </button>
         )}
       </section>
@@ -239,8 +329,8 @@ export function YouTubeChannelClient({
         <section className="border-border bg-surface/60 rounded-3xl border p-7">
           <h2 className="text-base font-semibold">Choose a channel</h2>
           <p className="text-muted-foreground mt-1 text-sm">
-            This Google account manages more than one YouTube channel. Pick
-            the one you want ClipCast to auto-clip.
+            This Google account manages more than one YouTube channel. Pick the
+            one you want ClipCast to auto-clip.
           </p>
           <div className="mt-4 space-y-2">
             {pendingChannels.map((channel) => (
@@ -268,7 +358,7 @@ export function YouTubeChannelClient({
       )}
 
       {/* Latest videos (only when connected) */}
-      {isConnected && (
+      {connectionActive && (
         <section className="border-border bg-surface/60 rounded-3xl border p-7">
           <div className="mb-4 flex items-center justify-between">
             <div>
@@ -278,7 +368,7 @@ export function YouTubeChannelClient({
               </p>
             </div>
             <button
-              onClick={fetchVideos}
+              onClick={() => void fetchVideos(true)}
               disabled={loadingVideos}
               className="border-border bg-surface hover:bg-surface-2 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium disabled:opacity-60"
             >
@@ -295,6 +385,20 @@ export function YouTubeChannelClient({
             <div className="text-muted-foreground grid place-items-center py-10 text-sm">
               <Loader2 className="mb-2 size-5 animate-spin" />
               Loading your uploads…
+            </div>
+          ) : videoError ? (
+            <div className="border-destructive/20 bg-destructive/5 rounded-2xl border px-5 py-6 text-center">
+              <p className="text-destructive text-sm font-medium">
+                Could not load your uploads
+              </p>
+              <p className="text-muted-foreground mt-1 text-xs">{videoError}</p>
+              <button
+                type="button"
+                onClick={() => void fetchVideos(true)}
+                className="border-border bg-surface hover:bg-surface-2 mt-4 rounded-full border px-4 py-2 text-xs font-semibold"
+              >
+                Try again
+              </button>
             </div>
           ) : videos.length === 0 ? (
             <p className="text-muted-foreground py-6 text-center text-sm">
@@ -358,7 +462,7 @@ export function YouTubeChannelClient({
           <div className="bg-brand-soft text-brand ring-brand/20 grid size-11 shrink-0 place-items-center rounded-2xl ring-1">
             <Clock className="size-5" />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h2 className="text-base font-semibold">
               Auto-schedule · Daily CRON
             </h2>
@@ -373,7 +477,33 @@ export function YouTubeChannelClient({
               schedule
             </div>
           </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoClip}
+            aria-label="Automatically clip new YouTube uploads"
+            onClick={handleAutoClipToggle}
+            disabled={!connectionActive || savingAutoClip}
+            className={`relative mt-1 h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              autoClip ? "bg-brand" : "bg-surface-2 ring-border ring-1"
+            }`}
+          >
+            <span
+              className={`absolute top-1 size-4 rounded-full shadow-sm transition-all ${
+                autoClip
+                  ? "bg-brand-foreground left-6"
+                  : "bg-muted-foreground left-1"
+              }`}
+            />
+          </button>
         </div>
+        <p className="text-muted-foreground border-border mt-4 border-t pt-4 text-xs">
+          {connectionActive
+            ? autoClip
+              ? "Automation is active. Each new upload is queued once in Highlights mode."
+              : "Automation is paused. You can still use Clip it on any video above."
+            : "Connect a channel before enabling automation."}
+        </p>
       </section>
 
       {/* Features */}

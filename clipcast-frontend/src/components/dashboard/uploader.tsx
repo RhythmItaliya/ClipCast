@@ -30,6 +30,7 @@ const CLIP_MODES = [
   { id: "educational", label: "Educational" },
   { id: "motivational", label: "Motivational" },
   { id: "highlights", label: "Highlights" },
+  { id: "others", label: "Others" },
 ] as const;
 
 export function Uploader() {
@@ -37,6 +38,14 @@ export function Uploader() {
   const [preview, setPreview] = useState(false);
   const [mode, setMode] = useState("all");
   const [file, setFile] = useState<File | null>(null);
+  // Read locally via a temporary <video> element the instant a file is
+  // picked — free and instant (no upload/network needed), and closes the
+  // same "duration unknown at gate time" gap the YouTube path had: without
+  // this, the server-side credit gate had nothing but a flat 5-minute guess
+  // to check a 4-hour upload against.
+  const [fileDurationSeconds, setFileDurationSeconds] = useState<
+    number | null
+  >(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -69,6 +78,22 @@ export function Uploader() {
       return;
     }
     setFile(candidate);
+    setFileDurationSeconds(null);
+
+    // Local metadata read via an off-DOM <video> element — no upload, no
+    // network call, resolves almost instantly even for a multi-hour file
+    // since only the container's metadata needs to load, not the content.
+    const probe = document.createElement("video");
+    probe.preload = "metadata";
+    const objectUrl = URL.createObjectURL(candidate);
+    probe.onloadedmetadata = () => {
+      if (Number.isFinite(probe.duration) && probe.duration > 0) {
+        setFileDurationSeconds(probe.duration);
+      }
+      URL.revokeObjectURL(objectUrl);
+    };
+    probe.onerror = () => URL.revokeObjectURL(objectUrl);
+    probe.src = objectUrl;
   };
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -125,8 +150,10 @@ export function Uploader() {
         urlResult.uploadedFileId,
         mode,
         preview,
+        fileDurationSeconds ?? undefined,
       );
       setFile(null);
+      setFileDurationSeconds(null);
       if (!processResult.success) {
         toast.warning("Uploaded, but not queued", {
           description: processResult.error,

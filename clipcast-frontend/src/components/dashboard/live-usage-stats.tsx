@@ -4,12 +4,15 @@ import { Activity, Coins, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { LIMITS } from "~/lib/limits";
+import type { QueueFile } from "~/components/dashboard/queue-table";
 
 /**
  * The hero credits link + "Videos today"/"Running jobs" stat tiles were
@@ -17,15 +20,25 @@ import { LIMITS } from "~/lib/limits";
  * job finished (or failed) in the background, these numbers went stale until
  * the next full page navigation, even though the queue table right below
  * them polls live and shows the correct status immediately. This provider
- * polls the same endpoint the queue table uses and recomputes all three from
- * the user's actual current jobs, so a failed/completed job is reflected
- * here too, not just in the queue rows.
+ * polls the same endpoint the queue table uses and recomputes everything
+ * from the user's actual current jobs, so a failed/completed job is
+ * reflected here too, not just in the queue rows.
  *
- * Split into a provider + two consumers because the credits link and the
- * stat tiles live in two different branches of the hero section's markup,
- * but should share a single poll rather than each running their own.
+ * It also owns the raw queue file list so QueueTable can share this single
+ * poll instead of running its own independent one — both used to hit
+ * /api/queue-status on their own schedule, which meant every load of the
+ * Overview page fired the same request twice. QueueTable still supports
+ * standalone rendering by falling back to its own polling when no provider
+ * is present.
  */
-type LiveUsage = { credits: number; uploadsToday: number; activeJobs: number };
+type LiveUsage = {
+  credits: number;
+  uploadsToday: number;
+  activeJobs: number;
+  files: QueueFile[];
+  refreshing: boolean;
+  refresh: () => Promise<boolean>;
+};
 
 const LiveUsageContext = createContext<LiveUsage | null>(null);
 
@@ -33,51 +46,70 @@ export function LiveUsageProvider({
   initialCredits,
   initialUploadsToday,
   initialActiveJobs,
+  initialFiles,
   children,
 }: {
   initialCredits: number;
   initialUploadsToday: number;
   initialActiveJobs: number;
+  initialFiles: QueueFile[];
   children: ReactNode;
 }) {
-  const [usage, setUsage] = useState<LiveUsage>({
-    credits: initialCredits,
-    uploadsToday: initialUploadsToday,
-    activeJobs: initialActiveJobs,
-  });
+  const [credits, setCredits] = useState(initialCredits);
+  const [uploadsToday, setUploadsToday] = useState(initialUploadsToday);
+  const [activeJobs, setActiveJobs] = useState(initialActiveJobs);
+  const [files, setFiles] = useState<QueueFile[]>(initialFiles);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const poll = useCallback(async (notify = false) => {
+    if (notify) setRefreshing(true);
+    try {
+      const res = await fetch("/api/queue-status");
+      if (!res.ok) return false;
+      const data = (await res.json()) as {
+        uploadedFiles: (Omit<QueueFile, "createdAt" | "updatedAt"> & {
+          createdAt: string;
+          updatedAt: string;
+        })[];
+        credits: number;
+        uploadsToday: number;
+        activeJobs: number;
+      };
+      setCredits(data.credits);
+      setUploadsToday(data.uploadsToday);
+      setActiveJobs(data.activeJobs);
+      setFiles(
+        data.uploadedFiles.map((f) => ({
+          ...f,
+          createdAt: new Date(f.createdAt),
+          updatedAt: new Date(f.updatedAt),
+        })),
+      );
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (notify) setRefreshing(false);
+    }
+  }, []);
+
+  const pollRef = useRef(poll);
+  pollRef.current = poll;
 
   useEffect(() => {
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/queue-status");
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as {
-          credits: number;
-          uploadsToday: number;
-          activeJobs: number;
-        };
-        // Same getUsageStats() the server-side gates use, so "Running jobs"
-        // drops a job the instant it's failed/completed rather than only on
-        // the next full page navigation.
-        setUsage({
-          credits: data.credits,
-          uploadsToday: data.uploadsToday,
-          activeJobs: data.activeJobs,
-        });
-      } catch {
-        // Silent — the next poll will retry.
-      }
-    };
-
-    void poll();
-    const interval = setInterval(poll, 15_000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+    void pollRef.current();
+    const interval = setInterval(() => void pollRef.current(), 15_000);
+    return () => clearInterval(interval);
   }, []);
+
+  const usage: LiveUsage = {
+    credits,
+    uploadsToday,
+    activeJobs,
+    files,
+    refreshing,
+    refresh: () => poll(true),
+  };
 
   return (
     <LiveUsageContext.Provider value={usage}>
@@ -92,6 +124,13 @@ export function useLiveUsage(): LiveUsage {
     throw new Error("useLiveUsage must be used within a LiveUsageProvider");
   }
   return ctx;
+}
+
+/** Same as useLiveUsage, but returns null instead of throwing when there's
+ * no provider — for components (like QueueTable) that work both inside and
+ * outside one. */
+export function useOptionalLiveUsage(): LiveUsage | null {
+  return useContext(LiveUsageContext);
 }
 
 export function CreditsLeftLink() {

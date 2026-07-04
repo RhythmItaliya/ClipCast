@@ -8,6 +8,7 @@ import { signIn, signOut } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { AuthInput, OrDivider, SocialButtons } from "~/components/auth-ui";
+import { OtpLoginModal } from "~/components/otp-login-modal";
 import { FRIENDLY_MESSAGES, isOffline } from "~/lib/errors";
 import { cn } from "~/lib/utils";
 import { loginSchema, type LoginFormValues } from "~/schemas/auth";
@@ -157,6 +158,10 @@ export function LoginForm({
           {isSubmitting ? "Signing in…" : "Sign in"}
         </button>
       </form>
+
+      <div className="mt-4 text-center">
+        <OtpLoginModal />
+      </div>
 
       <div className="mt-8 text-center text-sm">
         Don&apos;t have an account?{" "}

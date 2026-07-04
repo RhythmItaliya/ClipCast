@@ -12,11 +12,11 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { clearQueueItem } from "~/actions/generation";
 import { YoutubeIcon } from "~/components/brand";
+import { useOptionalLiveUsage } from "~/components/dashboard/live-usage-stats";
 import {
   fetchWithTimeout,
   FRIENDLY_MESSAGES,
@@ -79,7 +79,14 @@ export function QueueTable({
   title?: string;
   description?: string;
 }) {
-  const [files, setFiles] = useState<QueueFile[]>(initialFiles);
+  // When rendered inside a LiveUsageProvider (the Overview page), share its
+  // single poll of /api/queue-status instead of running a second, redundant
+  // one — both used to hit the same endpoint independently. Standalone use
+  // (the /dashboard/queue page has no provider) falls back to owning its
+  // own poll below.
+  const shared = useOptionalLiveUsage();
+
+  const [localFiles, setLocalFiles] = useState<QueueFile[]>(initialFiles);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   // Which specific button triggered the in-flight request, so only that one
@@ -88,45 +95,57 @@ export function QueueTable({
   const [busyAction, setBusyAction] = useState<
     "retry" | "cancel" | "clear" | null
   >(null);
-  const router = useRouter();
+
+  const files = shared ? shared.files : localFiles;
 
   useEffect(() => {
-    setFiles(initialFiles);
-  }, [initialFiles]);
+    if (!shared) setLocalFiles(initialFiles);
+  }, [initialFiles, shared]);
 
-  const fetchQueueStatus = useCallback(async (notifyOnError = false) => {
-    try {
-      const res = await fetchWithTimeout("/api/queue-status", {}, 15_000);
-      if (res.ok) {
-        const data = (await res.json()) as {
-          uploadedFiles: (Omit<QueueFile, "createdAt" | "updatedAt"> & {
-            createdAt: string;
-            updatedAt: string;
-          })[];
-        };
-        setFiles(
-          data.uploadedFiles.map((f) => ({
-            ...f,
-            createdAt: new Date(f.createdAt),
-            updatedAt: new Date(f.updatedAt),
-          })),
-        );
-      } else if (notifyOnError) {
-        toast.error("Couldn't refresh the queue", {
-          description: messageForStatus(res.status),
-        });
+  const fetchQueueStatus = useCallback(
+    async (notifyOnError = false) => {
+      if (shared) {
+        const ok = await shared.refresh();
+        if (!ok && notifyOnError) {
+          toast.error("Couldn't refresh the queue");
+        }
+        return;
       }
-    } catch (e) {
-      // Silent during background polling; loud on manual refresh.
-      if (notifyOnError) {
-        toast.error("Couldn't refresh the queue", {
-          description: getFriendlyErrorMessage(e),
-        });
+      try {
+        const res = await fetchWithTimeout("/api/queue-status", {}, 15_000);
+        if (res.ok) {
+          const data = (await res.json()) as {
+            uploadedFiles: (Omit<QueueFile, "createdAt" | "updatedAt"> & {
+              createdAt: string;
+              updatedAt: string;
+            })[];
+          };
+          setLocalFiles(
+            data.uploadedFiles.map((f) => ({
+              ...f,
+              createdAt: new Date(f.createdAt),
+              updatedAt: new Date(f.updatedAt),
+            })),
+          );
+        } else if (notifyOnError) {
+          toast.error("Couldn't refresh the queue", {
+            description: messageForStatus(res.status),
+          });
+        }
+      } catch (e) {
+        // Silent during background polling; loud on manual refresh.
+        if (notifyOnError) {
+          toast.error("Couldn't refresh the queue", {
+            description: getFriendlyErrorMessage(e),
+          });
+        }
       }
-    }
-  }, []);
+    },
+    [shared],
+  );
 
-  // Auto-poll while any job is still in progress.
+  // Auto-poll while any job is still in progress. Skipped entirely when a
+  // shared provider is present — it already runs its own interval.
   // Use adaptive intervals: 10s for recently-submitted jobs (likely queued or
   // in the download phase), 30s for jobs that have been processing for a while
   // (GPU rendering can take 5-20 min — no need to hammer the DB every 10s).
@@ -147,15 +166,17 @@ export function QueueTable({
   const pollIntervalMs = activeJobAgeMs < 2 * 60 * 1000 ? 10_000 : 30_000;
 
   useEffect(() => {
-    if (!hasActiveJobs) return;
+    if (shared || !hasActiveJobs) return;
     const interval = setInterval(() => void fetchQueueStatus(), pollIntervalMs);
     return () => clearInterval(interval);
-  }, [hasActiveJobs, pollIntervalMs, fetchQueueStatus]);
+  }, [shared, hasActiveJobs, pollIntervalMs, fetchQueueStatus]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
+    // fetchQueueStatus already re-fetches everything this table renders from
+    // the same endpoint — a router.refresh() here would just re-run the
+    // page's server component for the exact same data a second time.
     await fetchQueueStatus(true);
-    router.refresh();
     setTimeout(() => setRefreshing(false), 600);
   };
 
@@ -351,11 +372,18 @@ function QueueRow({
   const active = item.status === "queued" || item.status === "processing";
   const showRetry = item.status === "failed" || item.status === "cancelled";
 
-  const detail =
-    item.errorMessage ??
-    [item.isPreview ? "Preview · 480p" : null, item.clipMode]
-      .filter(Boolean)
-      .join(" · ");
+  // Only surface errorMessage for jobs that are actually in an error state.
+  // A job can carry a leftover errorMessage from an earlier failed attempt
+  // even after it later succeeds (stale data from before this row's status
+  // last changed), so status is the source of truth for whether to show it.
+  const showError =
+    (item.status === "failed" || item.status === "no credits") &&
+    !!item.errorMessage;
+  const detail = showError
+    ? item.errorMessage
+    : [item.isPreview ? "Preview · 480p" : null, item.clipMode]
+        .filter(Boolean)
+        .join(" · ");
 
   return (
     <tr className="hover:bg-background/40">
@@ -393,8 +421,8 @@ function QueueRow({
             </div>
             <div
               className={`truncate text-[11px] capitalize ${
-                item.errorMessage
-                  ? "text-destructive normal-case"
+                showError
+                  ? "text-destructive/80 normal-case"
                   : "text-muted-foreground"
               }`}
             >

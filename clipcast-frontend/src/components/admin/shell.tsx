@@ -5,16 +5,36 @@ import {
   Film,
   LayoutDashboard,
   ListChecks,
+  Loader2,
   LogOut,
   ScrollText,
   Shield,
   Users,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { LogoMark, Wordmark } from "~/components/brand";
+import { useConfirm } from "~/components/ui/confirm-dialog";
+
+// Must render inside a <Link>'s children — useLinkStatus reports whether
+// that specific link's navigation is still pending, so each nav item can
+// show its own spinner instead of the icon while the route transitions.
+function NavIcon({
+  icon: Icon,
+  className,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  className: string;
+}) {
+  const { pending } = useLinkStatus();
+  return pending ? (
+    <Loader2 className={`${className} animate-spin`} />
+  ) : (
+    <Icon className={className} />
+  );
+}
 
 // Admin-only navigation items
 const nav = [
@@ -72,6 +92,22 @@ export function AdminShell({
     nav[0];
   const displayName = name ?? email.split("@")[0] ?? "Admin";
 
+  const confirm = useConfirm();
+  const [signingOut, setSigningOut] = useState(false);
+  const handleSignOut = async () => {
+    const ok = await confirm({
+      title: "Sign out of ClipCast?",
+      confirmLabel: "Sign out",
+    });
+    if (!ok) return;
+    setSigningOut(true);
+    try {
+      await signOut({ redirectTo: "/login" });
+    } catch {
+      setSigningOut(false);
+    }
+  };
+
   return (
     <div className="bg-background text-foreground selection:bg-brand/30 h-screen overflow-hidden">
       <div className="flex h-full">
@@ -107,7 +143,7 @@ export function AdminShell({
                       : "text-muted-foreground hover:bg-surface hover:text-foreground"
                   }`}
                 >
-                  <Icon className="size-4" />
+                  <NavIcon icon={Icon} className="size-4" />
                   <span>{item.title}</span>
                   {active && (
                     <span className="bg-brand ml-auto size-1.5 rounded-full" />
@@ -145,10 +181,15 @@ export function AdminShell({
               <button
                 type="button"
                 title="Sign out"
-                onClick={() => signOut({ redirectTo: "/login" })}
-                className="text-muted-foreground hover:bg-surface hover:text-destructive grid size-8 place-items-center rounded-md"
+                onClick={handleSignOut}
+                disabled={signingOut}
+                className="text-muted-foreground hover:bg-surface hover:text-destructive grid size-8 place-items-center rounded-md disabled:opacity-50"
               >
-                <LogOut className="size-4" />
+                {signingOut ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <LogOut className="size-4" />
+                )}
               </button>
             </div>
           </div>

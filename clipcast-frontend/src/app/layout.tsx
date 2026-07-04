@@ -4,6 +4,8 @@ import { type Metadata } from "next";
 import { DM_Sans, Space_Grotesk } from "next/font/google";
 import { NetworkStatus } from "~/components/network-status";
 import { ToasterProvider } from "~/components/toaster-provider";
+import { TopLoader } from "~/components/top-loader";
+import { ConfirmDialogProvider } from "~/components/ui/confirm-dialog";
 
 export const metadata: Metadata = {
   title: "ClipCast — AI Podcast Clipper",
@@ -28,8 +30,9 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${spaceGrotesk.variable} ${dmSans.variable}`}>
       <body>
+        <TopLoader />
         <NetworkStatus />
-        {children}
+        <ConfirmDialogProvider>{children}</ConfirmDialogProvider>
         <ToasterProvider />
       </body>
     </html>

@@ -38,21 +38,29 @@ export default async function ClipsPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
-  const clips = await db.clip.findMany({
-    where: { userId: session.user.id },
-    select: {
-      id: true,
-      s3Key: true,
-      clipMode: true,
-      isPreview: true,
-      title: true,
-      duration: true,
-      createdAt: true,
-      uploadedFileId: true,
-      uploadedFile: { select: { displayName: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const [clips, user] = await Promise.all([
+    db.clip.findMany({
+      where: { userId: session.user.id },
+      select: {
+        id: true,
+        s3Key: true,
+        clipMode: true,
+        isPreview: true,
+        title: true,
+        duration: true,
+        createdAt: true,
+        uploadedFileId: true,
+        uploadedFile: { select: { displayName: true } },
+        youtubeVideoId: true,
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    db.user.findUnique({
+      where: { id: session.user.id },
+      select: { youtubeChannelId: true },
+    }),
+  ]);
+  const youtubeConnected = !!user?.youtubeChannelId;
 
   // Clips rendered before thumbnails existed have no thumbnailS3Key; only
   // batch-presign the ones that do.
@@ -83,8 +91,9 @@ export default async function ClipsPage() {
       duration: clip.duration,
       thumbnailUrl: thumbnailUrls[clip.id] ?? null,
       createdAt: relativeTime(clip.createdAt),
+      youtubeVideoId: clip.youtubeVideoId,
     });
   }
 
-  return <ClipsGrid groups={groups} />;
+  return <ClipsGrid groups={groups} youtubeConnected={youtubeConnected} />;
 }

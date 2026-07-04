@@ -14,9 +14,27 @@ export default async function SettingsPage() {
 
   const user = await db.user.findUnique({
     where: { id: session.user.id },
-    select: { name: true, email: true },
+    select: {
+      name: true,
+      email: true,
+      notifyClipReady: true,
+      notifyWeeklySummary: true,
+      notifyJobFailed: true,
+      notifyProductUpdates: true,
+    },
   });
   if (!user) redirect("/login");
 
-  return <SettingsClient name={user.name} email={user.email} />;
+  return (
+    <SettingsClient
+      name={user.name}
+      email={user.email}
+      notifications={{
+        clipReady: user.notifyClipReady,
+        weeklySummary: user.notifyWeeklySummary,
+        jobFailed: user.notifyJobFailed,
+        productUpdates: user.notifyProductUpdates,
+      }}
+    />
+  );
 }

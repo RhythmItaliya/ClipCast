@@ -7,16 +7,37 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  Loader2,
   Scissors,
   Settings,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { LogoMark, Wordmark, YoutubeIcon } from "~/components/brand";
+import { useLiveUsage } from "~/components/dashboard/live-usage-stats";
+import { useConfirm } from "~/components/ui/confirm-dialog";
+
+// Must render inside a <Link>'s children — useLinkStatus reports whether
+// that specific link's navigation is still pending, so each nav item can
+// show its own spinner instead of the icon while the route transitions.
+function NavIcon({
+  icon: Icon,
+  className,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  className: string;
+}) {
+  const { pending } = useLinkStatus();
+  return pending ? (
+    <Loader2 className={`${className} animate-spin`} />
+  ) : (
+    <Icon className={className} />
+  );
+}
 
 const nav = [
   {
@@ -59,13 +80,11 @@ const nav = [
 
 export function DashboardShell({
   children,
-  credits,
   email,
   name,
   isAdmin = false,
 }: {
   children: ReactNode;
-  credits: number;
   email: string;
   name: string | null;
   isAdmin?: boolean;
@@ -76,7 +95,29 @@ export function DashboardShell({
     nav.find((n) => n.to !== "/dashboard" && pathname.startsWith(n.to)) ??
     nav[0];
   const displayName = name ?? email.split("@")[0] ?? "Creator";
+  // Shared with every other credit display in the dashboard (hero button,
+  // queue table, etc.) via the single LiveUsageProvider mounted in
+  // dashboard/layout.tsx — this is now the only source of truth for
+  // credits, not a separately-passed static prop that could drift out of
+  // sync with the live-polled value shown elsewhere.
+  const { credits } = useLiveUsage();
   const creditPct = Math.max(0, Math.min(100, credits));
+
+  const confirm = useConfirm();
+  const [signingOut, setSigningOut] = useState(false);
+  const handleSignOut = async () => {
+    const ok = await confirm({
+      title: "Sign out of ClipCast?",
+      confirmLabel: "Sign out",
+    });
+    if (!ok) return;
+    setSigningOut(true);
+    try {
+      await signOut({ redirectTo: "/login" });
+    } catch {
+      setSigningOut(false);
+    }
+  };
 
   return (
     <div className="bg-background text-foreground selection:bg-brand/30 h-screen overflow-hidden">
@@ -105,7 +146,7 @@ export function DashboardShell({
                       : "text-muted-foreground hover:bg-surface hover:text-foreground"
                   }`}
                 >
-                  <Icon className="size-4" />
+                  <NavIcon icon={Icon} className="size-4" />
                   <span>{item.title}</span>
                   {active && (
                     <span className="bg-brand ml-auto size-1.5 rounded-full" />
@@ -171,10 +212,15 @@ export function DashboardShell({
               <button
                 type="button"
                 title="Sign out"
-                onClick={() => signOut({ redirectTo: "/login" })}
-                className="text-muted-foreground hover:bg-surface hover:text-destructive grid size-8 place-items-center rounded-md"
+                onClick={handleSignOut}
+                disabled={signingOut}
+                className="text-muted-foreground hover:bg-surface hover:text-destructive grid size-8 place-items-center rounded-md disabled:opacity-50"
               >
-                <LogOut className="size-4" />
+                {signingOut ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <LogOut className="size-4" />
+                )}
               </button>
             </div>
           </div>
@@ -204,10 +250,15 @@ export function DashboardShell({
                 <button
                   type="button"
                   title="Sign out"
-                  onClick={() => signOut({ redirectTo: "/login" })}
-                  className="border-border bg-surface text-muted-foreground hover:text-destructive grid size-9 place-items-center rounded-lg border lg:hidden"
+                  onClick={handleSignOut}
+                  disabled={signingOut}
+                  className="border-border bg-surface text-muted-foreground hover:text-destructive grid size-9 place-items-center rounded-lg border disabled:opacity-50 lg:hidden"
                 >
-                  <LogOut className="size-4" />
+                  {signingOut ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <LogOut className="size-4" />
+                  )}
                 </button>
                 <Link
                   href="/dashboard/billing"
@@ -236,7 +287,7 @@ export function DashboardShell({
                         : "text-muted-foreground"
                     }`}
                   >
-                    <Icon className="size-4" /> {item.title}
+                    <NavIcon icon={Icon} className="size-4" /> {item.title}
                   </Link>
                 );
               })}

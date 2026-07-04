@@ -5,24 +5,39 @@ import { signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { toast } from "sonner";
-import { deleteAccount, updateProfile } from "~/actions/auth";
+import {
+  deleteAccount,
+  updateNotificationPref,
+  updateProfile,
+  type NotificationPref,
+} from "~/actions/auth";
+import { useConfirm } from "~/components/ui/confirm-dialog";
 import {
   FRIENDLY_MESSAGES,
   getFriendlyErrorMessage,
   isOffline,
 } from "~/lib/errors";
 
+export type NotificationPrefs = {
+  clipReady: boolean;
+  weeklySummary: boolean;
+  jobFailed: boolean;
+  productUpdates: boolean;
+};
+
 export function SettingsClient({
   name,
   email,
+  notifications,
 }: {
   name: string | null;
   email: string;
+  notifications: NotificationPrefs;
 }) {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <ProfileSection initialName={name} email={email} />
-      <NotificationsSection />
+      <NotificationsSection initial={notifications} />
       <DangerZoneSection />
     </div>
   );
@@ -154,31 +169,31 @@ function Field({
   );
 }
 
-function NotificationsSection() {
-  const items = [
+function NotificationsSection({ initial }: { initial: NotificationPrefs }) {
+  const items: {
+    pref: NotificationPref;
+    title: string;
+    desc: string;
+  }[] = [
     {
-      id: "n1",
+      pref: "clipReady",
       title: "Clip ready",
       desc: "Email me when a clip is finished rendering.",
-      def: true,
     },
     {
-      id: "n2",
+      pref: "weeklySummary",
       title: "Weekly summary",
       desc: "A recap of your top clips every Monday.",
-      def: true,
     },
     {
-      id: "n3",
+      pref: "jobFailed",
       title: "Job failed",
       desc: "Alert me when a processing job fails.",
-      def: true,
     },
     {
-      id: "n4",
+      pref: "productUpdates",
       title: "Product updates",
       desc: "New features, tips and improvements.",
-      def: false,
     },
   ];
   return (
@@ -197,10 +212,11 @@ function NotificationsSection() {
       <div className="divide-border divide-y">
         {items.map((it) => (
           <ToggleRow
-            key={it.id}
+            key={it.pref}
+            pref={it.pref}
             title={it.title}
             desc={it.desc}
-            defaultOn={it.def}
+            defaultOn={initial[it.pref]}
           />
         ))}
       </div>
@@ -209,15 +225,42 @@ function NotificationsSection() {
 }
 
 function ToggleRow({
+  pref,
   title,
   desc,
   defaultOn,
 }: {
+  pref: NotificationPref;
   title: string;
   desc: string;
   defaultOn: boolean;
 }) {
   const [on, setOn] = useState(defaultOn);
+  const [saving, setSaving] = useState(false);
+
+  const handleToggle = async () => {
+    if (saving) return;
+    const next = !on;
+    setOn(next); // optimistic
+    setSaving(true);
+    try {
+      const res = await updateNotificationPref(pref, next);
+      if (!res.success) {
+        setOn(!next); // revert
+        toast.error("Couldn't save that preference", {
+          description: res.error,
+        });
+      }
+    } catch (err) {
+      setOn(!next);
+      toast.error("Couldn't save that preference", {
+        description: getFriendlyErrorMessage(err),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="flex items-center justify-between gap-6 py-4">
       <div className="min-w-0">
@@ -226,15 +269,20 @@ function ToggleRow({
       </div>
       <button
         type="button"
-        onClick={() => setOn((v) => !v)}
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+        onClick={handleToggle}
+        disabled={saving}
+        role="switch"
+        aria-checked={on}
+        aria-label={title}
+        className={`ring-border relative h-5 w-9 shrink-0 rounded-full ring-1 transition-colors disabled:cursor-wait disabled:opacity-60 ${
           on ? "bg-brand" : "bg-surface-2"
         }`}
-        aria-pressed={on}
       >
         <span
-          className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform ${
-            on ? "translate-x-5" : "translate-x-0.5"
+          className={`absolute top-0.5 left-0.5 size-4 rounded-full transition-all ${
+            on
+              ? "bg-brand-foreground translate-x-4"
+              : "bg-foreground translate-x-0"
           }`}
         />
       </button>
@@ -243,16 +291,19 @@ function ToggleRow({
 }
 
 function DangerZoneSection() {
+  const confirm = useConfirm();
   const [deleting, setDeleting] = useState(false);
 
   const handleDelete = async () => {
     if (deleting) return;
-    if (
-      !window.confirm(
-        "Permanently delete your account, all uploads and all clips? This can't be undone.",
-      )
-    )
-      return;
+    const ok = await confirm({
+      title: "Delete your account?",
+      description:
+        "Permanently delete your account, all uploads and all clips. This can't be undone.",
+      confirmLabel: "Delete account",
+      destructive: true,
+    });
+    if (!ok) return;
     if (isOffline()) {
       toast.error(FRIENDLY_MESSAGES.offline);
       return;

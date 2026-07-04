@@ -24,7 +24,7 @@ export default async function AdminUserDetailPage({
   const detail = await getAdminUserDetail(id);
   if (!detail) notFound();
 
-  const { user, jobs, clips, purchases } = detail;
+  const { user, jobs, clips, purchases, transactions } = detail;
   const displayName = user.name ?? user.email.split("@")[0] ?? user.email;
 
   return (
@@ -171,6 +171,45 @@ export default async function AdminUserDetailPage({
                     </div>
                   </div>
                   <span className="font-medium">{formatCents(p.amountTotal, p.currency)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Credit ledger */}
+        <section className="border-border bg-surface/60 rounded-3xl border p-5 lg:col-span-2">
+          <h3 className="mb-3 text-sm font-semibold">Credit ledger</h3>
+          {transactions.length === 0 ? (
+            <p className="text-muted-foreground py-6 text-center text-xs">
+              No credit activity yet — their current balance predates this
+              ledger. New purchases, job charges, or adjustments made here
+              will show up going forward.
+            </p>
+          ) : (
+            <ul className="divide-border divide-y">
+              {transactions.map((t) => (
+                <li
+                  key={t.id}
+                  className="flex items-center justify-between gap-3 py-2.5 text-sm"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium">
+                      {t.description ?? t.type}
+                    </div>
+                    <div className="text-muted-foreground text-xs">
+                      {new Date(t.createdAt).toLocaleDateString()} · balance
+                      after: {t.balanceAfter}
+                    </div>
+                  </div>
+                  <span
+                    className={`shrink-0 font-medium ${
+                      t.amount >= 0 ? "text-brand" : "text-destructive"
+                    }`}
+                  >
+                    {t.amount >= 0 ? "+" : ""}
+                    {t.amount}
+                  </span>
                 </li>
               ))}
             </ul>
