@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
+import { QUEUE_FILE_SELECT, toQueueFile } from "~/server/queue";
 import { getUsageStats } from "~/server/usage";
 
 export async function GET() {
@@ -15,30 +16,9 @@ export async function GET() {
       where: { id: session.user.id },
       select: {
         uploadedFiles: {
-          where: {
-            uploaded: true,
-          },
-          select: {
-            id: true,
-            s3Key: true,
-            displayName: true,
-            youtubeUrl: true,
-            status: true,
-            clipMode: true,
-            isPreview: true,
-            errorMessage: true,
-            processingSummary: true,
-            createdAt: true,
-            updatedAt: true,
-            _count: {
-              select: {
-                clips: true,
-              },
-            },
-          },
-          orderBy: {
-            createdAt: "desc",
-          },
+          where: { uploaded: true },
+          select: QUEUE_FILE_SELECT,
+          orderBy: { createdAt: "desc" },
         },
       },
     }),
@@ -51,23 +31,8 @@ export async function GET() {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  const formattedFiles = userData.uploadedFiles.map((file) => ({
-    id: file.id,
-    s3Key: file.s3Key,
-    filename: file.displayName ?? "Unknown filename",
-    youtubeUrl: file.youtubeUrl,
-    status: file.status,
-    clipMode: file.clipMode,
-    isPreview: file.isPreview,
-    errorMessage: file.errorMessage ?? null,
-    processingSummary: file.processingSummary ?? null,
-    clipsCount: file._count.clips,
-    createdAt: file.createdAt,
-    updatedAt: file.updatedAt,
-  }));
-
   return NextResponse.json({
-    uploadedFiles: formattedFiles,
+    uploadedFiles: userData.uploadedFiles.map(toQueueFile),
     credits: usage.creditsRemaining,
     uploadsToday: usage.uploadsToday,
     activeJobs: usage.activeJobs,

@@ -11,31 +11,15 @@ import { QueueTable } from "~/components/dashboard/queue-table";
 import { Uploader } from "~/components/dashboard/uploader";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
+import { getQueueFiles } from "~/server/queue";
 import { getUsageStats } from "~/server/usage";
 
 export default async function DashboardPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
-  const [files, recentClips, usage] = await Promise.all([
-    db.uploadedFile.findMany({
-      where: { userId: session.user.id, uploaded: true },
-      select: {
-        id: true,
-        s3Key: true,
-        displayName: true,
-        youtubeUrl: true,
-        status: true,
-        clipMode: true,
-        isPreview: true,
-        errorMessage: true,
-        processingSummary: true,
-        createdAt: true,
-        updatedAt: true,
-        _count: { select: { clips: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
+  const [queueFiles, recentClips, usage] = await Promise.all([
+    getQueueFiles(session.user.id),
     db.clip.findMany({
       where: { userId: session.user.id },
       select: {
@@ -51,21 +35,6 @@ export default async function DashboardPage() {
     }),
     getUsageStats(session.user.id),
   ]);
-
-  const queueFiles = files.map((file) => ({
-    id: file.id,
-    s3Key: file.s3Key,
-    filename: file.displayName ?? "Unknown filename",
-    youtubeUrl: file.youtubeUrl,
-    status: file.status,
-    clipMode: file.clipMode,
-    isPreview: file.isPreview,
-    errorMessage: file.errorMessage ?? null,
-    processingSummary: file.processingSummary ?? null,
-    clipsCount: file._count.clips,
-    createdAt: file.createdAt,
-    updatedAt: file.updatedAt,
-  }));
 
   return (
     <LiveUsageProvider
