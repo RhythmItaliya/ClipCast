@@ -10,9 +10,14 @@ import time
 import uuid
 import boto3
 import cv2
-from PIL import ImageFont
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from captions import (
+    CAPTION_FONT_PATH,
+    build_caption_subs,
+    parse_hex_color,
+)
 
 try:
     import ffmpegcv
@@ -32,7 +37,6 @@ import os
 from google import genai
 from google.genai import types as genai_types
 
-import pysubs2
 from tqdm import tqdm
 
 
@@ -41,6 +45,12 @@ class ProcessVideoRequest(BaseModel):
     youtube_url: str | None = None
     clip_mode: str = "qa"
     preview_only: bool = False
+    # "#RRGGBB" — the user's chosen active-word caption highlight color;
+    # None falls back to the ClipCast brand indigo.
+    caption_color: str | None = None
+    # The user's own watermark text. None/empty means NO watermark at all —
+    # nothing is hardcoded.
+    watermark_text: str | None = None
 
 
 CLIP_MODE_PROMPTS = {
@@ -126,18 +136,21 @@ Rules:
 
 Transcript:
 """,
-    "others": """\
+    "any": """\
 This is a podcast video transcript. I need clips between 30-60 seconds long.
-Find compelling, self-contained moments that do NOT clearly fit any of these
-existing categories: Q&A (a question and its answer), Educational (a taught
-lesson/tip/framework), Motivational (an inspiring personal story or mindset
-shift), Highlights (a bold, surprising, or viral-worthy quote). Think about
-what ELSE makes a podcast worth clipping — funny banter, a debate/disagreement,
-an emotional confession, an interesting tangent, a specific story, industry
-gossip, a hot take, wordplay, etc. — and invent a short, fresh 1-3 word category
-name for each clip that actually describes it (e.g. "Funny Moment", "Hot Take",
-"Debate", "Confession", "Behind the Scenes") rather than reusing the four
-categories above.
+This podcast could be about anything — comedy, storytelling, interviews, debate,
+tech, sports, true crime, relationships, business, anything at all. First
+understand what KIND of content this episode actually is, then find its most
+compelling, self-contained, clip-worthy moments of ANY type: funny exchanges,
+sad or emotional stories, heated arguments, bold hot takes, surprising reveals,
+great advice, wild anecdotes, vulnerable confessions — whatever this particular
+episode genuinely contains. Do not force moments into predefined boxes; let the
+content decide.
+
+For each clip, invent a short, fresh 1-3 word category tag that genuinely
+describes that specific moment (e.g. "Comedy", "Sad Story", "Hot Take",
+"Wild Story", "Life Advice", "Debate", "Confession") — whatever fits, not a
+fixed list.
 
 Rules:
 - Clips must not overlap.
@@ -146,11 +159,12 @@ Rules:
 - Include a short, punchy, clickable title for each clip (max 60 characters, no
   surrounding quotes) in a "title" field — this is shown to viewers, so make it
   a hook, not a description.
-- Include your invented category name (1-3 words, Title Case, no surrounding
+- Include your invented category tag (1-3 words, Title Case, no surrounding
   quotes) in a "category" field.
 - Output only JSON: [{"start": seconds, "end": seconds, "title": "...", "category": "..."}, ...].
   Must be parseable by json.loads().
 - Target 40-60 second clips.
+- Density: aim for roughly 1 high-quality clip per 5 minutes of podcast.
 - Exclude: greetings, thank-yous, farewells, and filler conversation.
 - If no valid clips exist output [].
 
@@ -161,11 +175,15 @@ Transcript:
 # Modes fanned out over when clip_mode == "all" — one full Gemini pass per
 # mode per chunk, so "All" actually surfaces a genuine mix across every
 # category instead of one blended call that empirically skews toward
-# whichever pattern (usually Q&A) is most mechanically easy to spot.
-ALL_FANOUT_MODES = ["qa", "educational", "motivational", "highlights", "others"]
+# whichever pattern (usually Q&A) is most mechanically easy to spot. The
+# "any" pass at the end is fully open-ended: the model decides what kinds
+# of moments this particular podcast contains (comedy, sad story, debate,
+# whatever) and tags each clip itself, so nothing that falls outside the
+# four fixed categories gets missed.
+ALL_FANOUT_MODES = ["qa", "educational", "motivational", "highlights", "any"]
 
-# Display name for each fixed mode's own category label (the "others" mode is
-# the only one where Gemini invents its own — see the prompt above).
+# Display name for each fixed mode's own category label (the "any" mode is
+# the only one where Gemini invents its own per clip — see the prompt above).
 MODE_CATEGORY_LABELS = {
     "qa": "Q&A",
     "educational": "Educational",
@@ -222,6 +240,10 @@ image = (
         "TRANSFORMERS_CACHE": "/model-cache/huggingface/transformers",
     })
     .add_local_dir("asd", "/asd", copy=True)
+    # Caption ASS generation lives in its own module so the render-test
+    # harness (scripts/render_caption_test.py) can exercise the exact
+    # production code on a cheap CPU container.
+    .add_local_python_source("captions")
 )
 
 app = modal.App("clipcast", image=image)
@@ -327,64 +349,28 @@ def create_vertical_video(tracks, scores, pyframes_path, pyavi_path, audio_path,
     subprocess.run(ffmpeg_command, shell=True, check=True, text=True)
 
 
-def rgb_to_ass_bgr(r, g, b):
-    """RGB (0-255 each) -> an ASS override-tag color hex string (BGR order)."""
-    return f"{b:02X}{g:02X}{r:02X}"
-
-
-# Lighter indigo from the same family as the site's #4F46E5 brand token. It
-# remains readable against the dark caption panel after video compression.
-HIGHLIGHT_COLOR_BGR = rgb_to_ass_bgr(129, 140, 248)
-
-CAPTION_FONT_PATH = "/usr/share/fonts/truetype/custom/Poppins-Black.ttf"
-
-
-def _layout_caption_lines(words, fontsize, max_line_width):
-    """Greedily wraps `words` into lines that fit `max_line_width` pixels,
-    using the exact font/size the caption is rendered in — so each word's
-    on-screen position can be computed precisely instead of relying on
-    libass's own automatic wrapping (which doesn't expose per-word pixel
-    positions, and so can't be used to place a background box behind just
-    the active word).
-
-    Returns a list of lines; each line is a list of
-    (word_index, x_offset_within_line, word_width) tuples, plus the line's
-    total width for centering.
+def watermark_filter(watermark_text):
+    """Optional subtle corner watermark — the user's OWN text, low-opacity
+    white, sized and faded like a real Reels/TikTok creator watermark.
+    Returns None when the user hasn't set one: no watermark is burned at
+    all (nothing is hardcoded).
     """
-    font = ImageFont.truetype(CAPTION_FONT_PATH, fontsize)
-    space_width = font.getlength(" ")
-
-    lines = []
-    current = []
-    current_x = 0.0
-
-    for i, word in enumerate(words):
-        word_width = font.getlength(word)
-        prefix = space_width if current else 0.0
-        if current and current_x + prefix + word_width > max_line_width:
-            lines.append({"words": current, "total_width": current_x})
-            current = []
-            current_x = 0.0
-            prefix = 0.0
-        x_offset = current_x + prefix
-        current.append((i, x_offset, word_width))
-        current_x = x_offset + word_width
-
-    if current:
-        lines.append({"words": current, "total_width": current_x})
-
-    return lines
-
-
-# Subtle, semi-transparent corner wordmark — sized and faded like a real
-# Reels/TikTok creator watermark rather than a bold solid label. Shared by
-# the full-quality caption render and the fast preview path below.
-WATERMARK_DRAWTEXT = (
-    "drawtext=text='ClipCast':"
-    "fontfile=/usr/share/fonts/truetype/custom/Poppins-Black.ttf:"
-    "x=w-tw-36:y=36:fontsize=42:fontcolor=white@0.55:"
-    "shadowcolor=black@0.35:shadowx=1:shadowy=1"
-)
+    text = (watermark_text or "").strip()[:40]
+    if not text:
+        return None
+    # ffmpeg drawtext text needs \ , ' , : and % escaped.
+    escaped = (
+        text.replace("\\", "\\\\")
+        .replace("'", "’")  # drawtext can't nest quotes; use a typographic one
+        .replace(":", "\\:")
+        .replace("%", "\\%")
+    )
+    return (
+        f"drawtext=text='{escaped}':"
+        f"fontfile={CAPTION_FONT_PATH}:"
+        "x=w-tw-36:y=36:fontsize=42:fontcolor=white@0.55:"
+        "shadowcolor=black@0.35:shadowx=1:shadowy=1"
+    )
 
 
 def create_thumbnail(video_path, output_path, at_seconds):
@@ -395,147 +381,41 @@ def create_thumbnail(video_path, output_path, at_seconds):
     )
 
 
-def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end, clip_video_path, output_path, max_words=4):
+def create_subtitles_with_ffmpeg(transcript_segments, clip_start, clip_end,
+                                 clip_video_path, output_path,
+                                 caption_color=None, watermark_text=None):
+    """Burns captions (and the user's optional watermark) onto a clip.
+
+    The caption look itself — white Poppins with no outline, a rounded pill
+    in the user's highlight color behind only the active word — lives in
+    captions.build_caption_subs, which scripts/render_caption_test.py can
+    render and show visually without a GPU deploy.
+    """
     temp_dir = os.path.dirname(output_path)
     subtitle_path = os.path.join(temp_dir, "temp_subtitles.ass")
 
-    clip_segments = [s for s in transcript_segments
-                     if s.get("start") is not None and s.get("end") is not None
-                     and s.get("end") > clip_start and s.get("start") < clip_end]
-
-    # Each chunk is a list of (word, start_rel, end_rel) — kept per-word
-    # (not joined into one string) so every word can get its own karaoke-timed
-    # highlight event below. Chunk on sentence boundaries (., ?, !) so the
-    # full sentence is on screen at once — not fixed 5-word buckets — with
-    # max_words only as a safety cap against a run-on sentence with no
-    # punctuation overflowing the frame.
-    chunks = []
-    current_chunk = []
-
-    for segment in clip_segments:
-        word = segment.get("word", "").strip()
-        seg_start = segment.get("start")
-        seg_end = segment.get("end")
-        if not word or seg_start is None or seg_end is None:
-            continue
-        start_rel = max(0.0, seg_start - clip_start)
-        end_rel = max(0.0, seg_end - clip_start)
-        if end_rel <= 0:
-            continue
-        current_chunk.append((word, start_rel, end_rel))
-        ends_sentence = word[-1:] in ".?!" or len(current_chunk) >= max_words
-        if ends_sentence:
-            chunks.append(current_chunk)
-            current_chunk = []
-
-    if current_chunk:
-        chunks.append(current_chunk)
-
-    PLAY_RES_X = 1080
-    PLAY_RES_Y = 1920
-    FONT_SIZE = 120
-    MARGIN_L = 60
-    MARGIN_R = 60
-    # Raised well off the bottom edge (was 50px) so captions clear a
-    # platform's own bottom UI (like/comment/share rail) instead of hugging
-    # the very bottom of the frame.
-    MARGIN_V = 320
-    subs = pysubs2.SSAFile()
-    subs.info["ScaledBorderAndShadow"] = "yes"
-    subs.info["PlayResX"] = PLAY_RES_X
-    subs.info["PlayResY"] = PLAY_RES_Y
-    subs.info["ScriptType"] = "v4.00+"
-
-    style_name = "Default"
-    new_style = pysubs2.SSAStyle()
-    new_style.fontname = "Poppins Black"
-    new_style.fontsize = FONT_SIZE
-    new_style.primarycolor = pysubs2.Color(255, 255, 255)
-    # A stable translucent panel follows the complete caption. This is calmer
-    # than a large moving block and cannot drift away from the text because
-    # libass measures and renders both together.
-    new_style.borderstyle = 3
-    new_style.outline = 14.0
-    new_style.outlinecolor = pysubs2.Color(18, 24, 38, 72)
-    new_style.shadow = 0.0
-    new_style.shadowcolor = pysubs2.Color(0, 0, 0, 0)
-    new_style.alignment = 2
-    new_style.marginl = MARGIN_L
-    new_style.marginr = MARGIN_R
-    new_style.marginv = MARGIN_V
-    new_style.spacing = 0.0
-    subs.styles[style_name] = new_style
-
-    highlight_style_name = "WordHighlight"
-    highlight_style = pysubs2.SSAStyle()
-    highlight_style.fontname = new_style.fontname
-    highlight_style.fontsize = FONT_SIZE
-    highlight_style.primarycolor = new_style.primarycolor
-    highlight_style.borderstyle = 1
-    highlight_style.outline = 0.0
-    highlight_style.shadow = 0.0
-    highlight_style.alignment = new_style.alignment
-    highlight_style.marginl = MARGIN_L
-    highlight_style.marginr = MARGIN_R
-    highlight_style.marginv = MARGIN_V
-    highlight_style.spacing = 0.0
-    subs.styles[highlight_style_name] = highlight_style
-
-    max_line_width = PLAY_RES_X - MARGIN_L - MARGIN_R
-
-    for chunk in chunks:
-        words = [w for w, _, _ in chunk]
-        lines = _layout_caption_lines(words, FONT_SIZE, max_line_width)
-        # The stable base event owns both the white text and dark panel.
-        chunk_start = chunk[0][1]
-        chunk_end = chunk[-1][2]
-        line_text = "\\N".join(
-            " ".join(words[i] for i, _, _ in line["words"]) for line in lines
-        )
-        subs.events.append(pysubs2.SSAEvent(
-            start=pysubs2.make_time(s=chunk_start),
-            end=pysubs2.make_time(s=chunk_end),
-            text=line_text, style=style_name,
-            layer=0,
-        ))
-
-        # Overlay the identical caption while each word is spoken, changing
-        # only that word to brand indigo. Matching text and wrapping keeps the
-        # panel stationary and eliminates detached or empty highlight boxes.
-        for active_index, (_, start_rel, end_rel) in enumerate(chunk):
-            highlighted_lines = []
-            for line in lines:
-                rendered_words = []
-                for word_index, _, _ in line["words"]:
-                    word = words[word_index]
-                    if word_index == active_index:
-                        word = (
-                            f"{{\\c&H{HIGHLIGHT_COLOR_BGR}&}}{word}"
-                            "{\\c&HFFFFFF&}"
-                        )
-                    rendered_words.append(word)
-                highlighted_lines.append(" ".join(rendered_words))
-
-            subs.events.append(pysubs2.SSAEvent(
-                start=pysubs2.make_time(s=start_rel),
-                end=pysubs2.make_time(s=end_rel),
-                text="\\N".join(highlighted_lines),
-                style=highlight_style_name,
-                layer=1,
-            ))
-
+    subs = build_caption_subs(
+        transcript_segments, clip_start, clip_end,
+        highlight_rgb=parse_hex_color(caption_color),
+    )
     subs.save(subtitle_path)
+
+    filters = [f"ass={subtitle_path}"]
+    wm = watermark_filter(watermark_text)
+    if wm:
+        filters.append(wm)
 
     ffmpeg_cmd = (
         f"ffmpeg -y -i {clip_video_path} "
-        f"-vf \"ass={subtitle_path},{WATERMARK_DRAWTEXT}\" "
+        f"-vf \"{','.join(filters)}\" "
         f"-c:v h264_nvenc -preset p6 -cq 18 -b:v 0 "
         f"-c:a copy -movflags +faststart {output_path}"
     )
     subprocess.run(ffmpeg_cmd, shell=True, check=True)
 
 
-def create_preview_clip(base_dir, original_video_path, s3_key, start_time, end_time, clip_index, title=""):
+def create_preview_clip(base_dir, original_video_path, s3_key, start_time, end_time, clip_index, title="",
+                        watermark_text=None):
     clip_name = f"preview_{clip_index}"
     s3_key_dir = os.path.dirname(s3_key)
     output_s3_key = f"{s3_key_dir}/{clip_name}.mp4"
@@ -563,11 +443,17 @@ def create_preview_clip(base_dir, original_video_path, s3_key, start_time, end_t
     crop_x = (src_w - crop_w) // 2
     crop_y = (src_h - crop_h) // 2
 
+    preview_filters = [
+        f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y}",
+        "scale=480:854",
+        "drawtext=text='PREVIEW':fontsize=24:fontcolor=white@0.6:x=(w-tw)/2:y=20",
+    ]
+    wm = watermark_filter(watermark_text)
+    if wm:
+        preview_filters.append(wm)
     ffmpeg_cmd = (
         f"ffmpeg -y -ss {start_time} -t {duration} -i {original_video_path} "
-        f'-vf "crop={crop_w}:{crop_h}:{crop_x}:{crop_y},scale=480:854,'
-        f"drawtext=text='PREVIEW':fontsize=24:fontcolor=white@0.6:x=(w-tw)/2:y=20,"
-        f'{WATERMARK_DRAWTEXT}" '
+        f'-vf "{",".join(preview_filters)}" '
         f"-c:v h264 -preset ultrafast -crf 30 -c:a aac -b:a 96k {output_path}"
     )
     subprocess.run(ffmpeg_cmd, shell=True, check=True, capture_output=True)
@@ -587,7 +473,8 @@ def create_preview_clip(base_dir, original_video_path, s3_key, start_time, end_t
     }
 
 
-def process_clip(base_dir, original_video_path, s3_key, start_time, end_time, clip_index, transcript_segments, title=""):
+def process_clip(base_dir, original_video_path, s3_key, start_time, end_time, clip_index, transcript_segments, title="",
+                 caption_color=None, watermark_text=None):
     clip_name = f"clip_{clip_index}"
     s3_key_dir = os.path.dirname(s3_key)
     output_s3_key = f"{s3_key_dir}/{clip_name}.mp4"
@@ -645,7 +532,11 @@ def process_clip(base_dir, original_video_path, s3_key, start_time, end_time, cl
     create_vertical_video(tracks, scores, pyframes_path, pyavi_path, audio_path, vertical_mp4_path)
     print(f"Clip {clip_index} vertical video creation time: {time.time() - cvv_start:.2f} seconds")
 
-    create_subtitles_with_ffmpeg(transcript_segments, start_time, end_time, vertical_mp4_path, subtitle_output_path)
+    create_subtitles_with_ffmpeg(
+        transcript_segments, start_time, end_time,
+        vertical_mp4_path, subtitle_output_path,
+        caption_color=caption_color, watermark_text=watermark_text,
+    )
 
     thumbnail_path = clip_dir / "thumb.jpg"
     create_thumbnail(subtitle_output_path, thumbnail_path, at_seconds=min(1.0, duration * 0.15))
@@ -925,7 +816,7 @@ class ClipCast:
         def _run_mode(mode: str) -> tuple[list, list[str]]:
             """Runs one mode's prompt across every chunk, tagging each
             returned moment with this mode's category label (or, for
-            "others", whatever category Gemini itself invented)."""
+            "any", whatever category Gemini itself invented)."""
             prompt = CLIP_MODE_PROMPTS.get(mode, CLIP_MODE_PROMPTS["qa"])
             mode_moments: list = []
             sources: list[str] = []
@@ -973,12 +864,12 @@ class ClipCast:
                 if moments:
                     for m in moments:
                         if isinstance(m, dict):
-                            # Fixed modes get their own display label; "others"
+                            # Fixed modes get their own display label; "any"
                             # keeps whatever category Gemini invented for that
-                            # specific moment (falling back to "Others" if it
+                            # specific moment (falling back to "Moment" if it
                             # left the field out).
                             m["category"] = MODE_CATEGORY_LABELS.get(
-                                mode, str(m.get("category") or "Others").strip()[:40]
+                                mode, str(m.get("category") or "Moment").strip()[:40]
                             )
                             m["mode"] = mode
                     mode_moments.extend(moments)
@@ -1246,18 +1137,20 @@ class ClipCast:
                 if request.preview_only:
                     record = create_preview_clip(
                         base_dir, video_path, request.s3_key,
-                        moment["start"], moment["end"], index, moment["title"]
+                        moment["start"], moment["end"], index, moment["title"],
+                        watermark_text=request.watermark_text,
                     )
                 else:
                     record = process_clip(
                         base_dir, video_path, request.s3_key,
-                        moment["start"], moment["end"], index, transcript_segments, moment["title"]
+                        moment["start"], moment["end"], index, transcript_segments, moment["title"],
+                        caption_color=request.caption_color,
+                        watermark_text=request.watermark_text,
                     )
-                # Per-clip category (e.g. "Q&A", "Educational", or an
-                # AI-invented "Others" label) — only meaningfully populated
-                # when the job ran in "all" mode; None otherwise, in which
-                # case the frontend already knows the single mode the whole
-                # job was submitted with.
+                # Per-clip category: a fixed label ("Q&A", "Educational", …)
+                # for the fixed modes, or the AI-invented tag for "any" —
+                # also the per-clip source category when the job ran in
+                # "all" mode.
                 record["category"] = moment.get("category")
                 clip_records.append(record)
                 clips_rendered += 1
