@@ -1,12 +1,13 @@
 "use client";
 
-import { Bell, Loader2, Mail, Trash2, User } from "lucide-react";
+import { Bell, Loader2, Mail, Paintbrush, Trash2, User } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState, type InputHTMLAttributes, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   deleteAccount,
+  updateClipAppearance,
   updateNotificationPref,
   updateProfile,
   type NotificationPref,
@@ -25,21 +26,161 @@ export type NotificationPrefs = {
   productUpdates: boolean;
 };
 
+export type ClipAppearance = {
+  captionColor: string | null;
+  watermarkText: string | null;
+};
+
 export function SettingsClient({
   name,
   email,
   notifications,
+  clipAppearance,
 }: {
   name: string | null;
   email: string;
   notifications: NotificationPrefs;
+  clipAppearance: ClipAppearance;
 }) {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <ProfileSection initialName={name} email={email} />
+      <ClipAppearanceSection initial={clipAppearance} />
       <NotificationsSection initial={notifications} />
       <DangerZoneSection />
     </div>
+  );
+}
+
+// Brand indigo first (the default when nothing is picked), then a spread of
+// caption-highlight colors that stay readable under white pill text.
+const CAPTION_COLORS = [
+  { hex: "#6366F1", label: "Indigo (default)" },
+  { hex: "#22C55E", label: "Green" },
+  { hex: "#EAB308", label: "Yellow" },
+  { hex: "#EF4444", label: "Red" },
+  { hex: "#EC4899", label: "Pink" },
+  { hex: "#F97316", label: "Orange" },
+  { hex: "#06B6D4", label: "Cyan" },
+  { hex: "#8B5CF6", label: "Purple" },
+] as const;
+
+function ClipAppearanceSection({ initial }: { initial: ClipAppearance }) {
+  // null means "brand default" — visually the same swatch as #6366F1, but
+  // stored as null so a future brand-color change applies automatically.
+  const [color, setColor] = useState<string | null>(initial.captionColor);
+  const [watermark, setWatermark] = useState(initial.watermarkText ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const selectedHex = (color ?? CAPTION_COLORS[0].hex).toUpperCase();
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (saving) return;
+    if (isOffline()) {
+      toast.error(FRIENDLY_MESSAGES.offline);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await updateClipAppearance({
+        captionColor: color,
+        watermarkText: watermark.trim() || null,
+      });
+      if (res.success) {
+        toast.success("Clip appearance saved.", {
+          description: "New clips will use these settings.",
+        });
+      } else {
+        toast.error("Couldn't save clip appearance", {
+          description: res.error,
+        });
+      }
+    } catch (err) {
+      toast.error("Couldn't save clip appearance", {
+        description: getFriendlyErrorMessage(err),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="border-border bg-surface/60 rounded-3xl border p-6">
+      <header className="mb-5 flex items-center gap-3">
+        <span className="bg-brand-soft text-brand grid size-9 place-items-center rounded-xl">
+          <Paintbrush className="size-4" />
+        </span>
+        <div>
+          <h2 className="text-base font-semibold">Clip appearance</h2>
+          <p className="text-muted-foreground text-xs">
+            How captions and branding look on your rendered clips.
+          </p>
+        </div>
+      </header>
+
+      <form onSubmit={handleSave} className="space-y-5">
+        <div>
+          <span className="mb-2 block text-xs font-medium">
+            Caption highlight color
+          </span>
+          <p className="text-muted-foreground mb-3 text-xs">
+            The color behind the word being spoken.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {CAPTION_COLORS.map((c, i) => {
+              const isSelected =
+                selectedHex === c.hex.toUpperCase() &&
+                (i !== 0 || color === null || color.toUpperCase() === c.hex);
+              return (
+                <button
+                  key={c.hex}
+                  type="button"
+                  title={c.label}
+                  onClick={() => setColor(i === 0 ? null : c.hex)}
+                  className={`size-9 rounded-full transition-transform hover:scale-110 ${
+                    isSelected
+                      ? "ring-foreground ring-2 ring-offset-2"
+                      : "ring-border ring-1"
+                  }`}
+                  style={{ backgroundColor: c.hex }}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium">
+              Watermark text (optional)
+            </span>
+            <input
+              value={watermark}
+              onChange={(e) => setWatermark(e.target.value)}
+              maxLength={40}
+              placeholder="e.g. @yourhandle"
+              className="border-border bg-background focus:border-brand w-full rounded-xl border px-3 py-2.5 text-sm outline-none"
+            />
+          </label>
+          <p className="text-muted-foreground mt-1.5 text-xs">
+            Shown small and semi-transparent in the top corner of your clips.
+            Leave empty for no watermark.
+          </p>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={saving}
+            className="bg-brand text-brand-foreground flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold hover:opacity-90 disabled:opacity-60"
+          >
+            {saving && <Loader2 className="size-4 animate-spin" />}
+            Save appearance
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }
 

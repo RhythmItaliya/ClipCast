@@ -12,19 +12,21 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useState } from "react";
 import { toast } from "sonner";
 import { clearQueueItem } from "~/actions/generation";
 import { YoutubeIcon } from "~/components/brand";
-import { useOptionalLiveUsage } from "~/components/dashboard/live-usage-stats";
 import {
   fetchWithTimeout,
   FRIENDLY_MESSAGES,
   getFriendlyErrorMessage,
   isOffline,
-  messageForStatus,
 } from "~/lib/errors";
 import { TOAST_DURATION_SHORT } from "~/lib/utils";
+import {
+  useQueueStatus,
+  useRefreshQueueStatus,
+} from "~/hooks/use-queue-status";
 
 export type QueueFile = {
   id: string;
@@ -37,8 +39,10 @@ export type QueueFile = {
   clipsCount: number;
   errorMessage: string | null;
   processingSummary: string | null;
-  createdAt: Date;
-  updatedAt: Date;
+  // ISO strings — this type mirrors the /api/queue-status JSON payload
+  // exactly so the same shape flows from server seed to client cache.
+  createdAt: string;
+  updatedAt: string;
 };
 
 const BADGES: Record<string, { label: string; className: string }> = {
@@ -69,24 +73,22 @@ const BADGES: Record<string, { label: string; className: string }> = {
 };
 
 export function QueueTable({
-  initialFiles,
   compact = false,
   title = "Queue",
   description = "Latest processing jobs across your workspace.",
 }: {
-  initialFiles: QueueFile[];
   compact?: boolean;
   title?: string;
   description?: string;
 }) {
-  // When rendered inside a LiveUsageProvider (the Overview page), share its
-  // single poll of /api/queue-status instead of running a second, redundant
-  // one — both used to hit the same endpoint independently. Standalone use
-  // (the /dashboard/queue page has no provider) falls back to owning its
-  // own poll below.
-  const shared = useOptionalLiveUsage();
+  // Files and polling live in the shared queue-status query (seeded
+  // server-side in dashboard/layout.tsx). This subscribes to the files
+  // slice only — structural sharing keeps unchanged rows (and the whole
+  // array, when nothing changed) referentially identical, so an unchanged
+  // poll tick renders nothing.
+  const { data: files = [] } = useQueueStatus((d) => d.uploadedFiles);
+  const refresh = useRefreshQueueStatus();
 
-  const [localFiles, setLocalFiles] = useState<QueueFile[]>(initialFiles);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   // Which specific button triggered the in-flight request, so only that one
@@ -96,91 +98,23 @@ export function QueueTable({
     "retry" | "cancel" | "clear" | null
   >(null);
 
-  const files = shared ? shared.files : localFiles;
-
-  useEffect(() => {
-    if (!shared) setLocalFiles(initialFiles);
-  }, [initialFiles, shared]);
-
   const fetchQueueStatus = useCallback(
     async (notifyOnError = false) => {
-      if (shared) {
-        const ok = await shared.refresh();
-        if (!ok && notifyOnError) {
-          toast.error("Couldn't refresh the queue");
-        }
-        return;
-      }
-      try {
-        const res = await fetchWithTimeout("/api/queue-status", {}, 15_000);
-        if (res.ok) {
-          const data = (await res.json()) as {
-            uploadedFiles: (Omit<QueueFile, "createdAt" | "updatedAt"> & {
-              createdAt: string;
-              updatedAt: string;
-            })[];
-          };
-          setLocalFiles(
-            data.uploadedFiles.map((f) => ({
-              ...f,
-              createdAt: new Date(f.createdAt),
-              updatedAt: new Date(f.updatedAt),
-            })),
-          );
-        } else if (notifyOnError) {
-          toast.error("Couldn't refresh the queue", {
-            description: messageForStatus(res.status),
-          });
-        }
-      } catch (e) {
-        // Silent during background polling; loud on manual refresh.
-        if (notifyOnError) {
-          toast.error("Couldn't refresh the queue", {
-            description: getFriendlyErrorMessage(e),
-          });
-        }
+      const ok = await refresh();
+      if (!ok && notifyOnError) {
+        toast.error("Couldn't refresh the queue");
       }
     },
-    [shared],
+    [refresh],
   );
-
-  // Auto-poll while any job is still in progress. Skipped entirely when a
-  // shared provider is present — it already runs its own interval.
-  // Use adaptive intervals: 10s for recently-submitted jobs (likely queued or
-  // in the download phase), 30s for jobs that have been processing for a while
-  // (GPU rendering can take 5-20 min — no need to hammer the DB every 10s).
-  const hasActiveJobs = files.some(
-    (f) => f.status === "queued" || f.status === "processing",
-  );
-  const oldestActiveUpdatedAt = hasActiveJobs
-    ? Math.min(
-        ...files
-          .filter((f) => f.status === "queued" || f.status === "processing")
-          .map((f) => new Date(f.updatedAt).getTime()),
-      )
-    : null;
-  const activeJobAgeMs =
-    oldestActiveUpdatedAt != null ? Date.now() - oldestActiveUpdatedAt : 0;
-  // < 2 min since last status update → poll every 10s (fast feedback for downloads)
-  // >= 2 min → poll every 30s (GPU processing — no rush)
-  const pollIntervalMs = activeJobAgeMs < 2 * 60 * 1000 ? 10_000 : 30_000;
-
-  useEffect(() => {
-    if (shared || !hasActiveJobs) return;
-    const interval = setInterval(() => void fetchQueueStatus(), pollIntervalMs);
-    return () => clearInterval(interval);
-  }, [shared, hasActiveJobs, pollIntervalMs, fetchQueueStatus]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    // fetchQueueStatus already re-fetches everything this table renders from
-    // the same endpoint — a router.refresh() here would just re-run the
-    // page's server component for the exact same data a second time.
     await fetchQueueStatus(true);
     setTimeout(() => setRefreshing(false), 600);
   };
 
-  const handleRetry = async (fileId: string) => {
+  const handleRetry = useCallback(async (fileId: string) => {
     if (isOffline()) {
       toast.error(FRIENDLY_MESSAGES.offline);
       return;
@@ -211,9 +145,9 @@ export function QueueTable({
       setBusyId(null);
       setBusyAction(null);
     }
-  };
+  }, [fetchQueueStatus]);
 
-  const handleCancel = async (fileId: string) => {
+  const handleCancel = useCallback(async (fileId: string) => {
     if (isOffline()) {
       toast.error(FRIENDLY_MESSAGES.offline);
       return;
@@ -249,9 +183,9 @@ export function QueueTable({
       setBusyId(null);
       setBusyAction(null);
     }
-  };
+  }, [fetchQueueStatus]);
 
-  const handleClear = async (fileId: string) => {
+  const handleClear = useCallback(async (fileId: string) => {
     setBusyId(fileId);
     setBusyAction("clear");
     try {
@@ -270,7 +204,7 @@ export function QueueTable({
       setBusyId(null);
       setBusyAction(null);
     }
-  };
+  }, [fetchQueueStatus]);
 
   const rows = compact ? files.slice(0, 3) : files;
 
@@ -350,7 +284,10 @@ export function QueueTable({
   );
 }
 
-function QueueRow({
+// Memoized: with stable row object identity from the store's mergeFiles and
+// useCallback'd handlers above, only rows whose data actually changed
+// re-render when the queue updates.
+const QueueRow = memo(function QueueRow({
   item,
   busy,
   busyAction,
@@ -505,4 +442,4 @@ function QueueRow({
       </td>
     </tr>
   );
-}
+});

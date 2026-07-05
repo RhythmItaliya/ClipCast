@@ -18,8 +18,8 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, type ComponentType, type ReactNode } from "react";
 import { LogoMark, Wordmark, YoutubeIcon } from "~/components/brand";
-import { useLiveUsage } from "~/components/dashboard/live-usage-stats";
 import { useConfirm } from "~/components/ui/confirm-dialog";
+import { useQueueStatus } from "~/hooks/use-queue-status";
 
 // Must render inside a <Link>'s children — useLinkStatus reports whether
 // that specific link's navigation is still pending, so each nav item can
@@ -95,13 +95,6 @@ export function DashboardShell({
     nav.find((n) => n.to !== "/dashboard" && pathname.startsWith(n.to)) ??
     nav[0];
   const displayName = name ?? email.split("@")[0] ?? "Creator";
-  // Shared with every other credit display in the dashboard (hero button,
-  // queue table, etc.) via the single LiveUsageProvider mounted in
-  // dashboard/layout.tsx — this is now the only source of truth for
-  // credits, not a separately-passed static prop that could drift out of
-  // sync with the live-polled value shown elsewhere.
-  const { credits } = useLiveUsage();
-  const creditPct = Math.max(0, Math.min(100, credits));
 
   const confirm = useConfirm();
   const [signingOut, setSigningOut] = useState(false);
@@ -156,31 +149,7 @@ export function DashboardShell({
             })}
           </nav>
 
-          {/* Credits card */}
-          <div className="border-border bg-surface m-3 rounded-2xl border p-4">
-            <div className="text-muted-foreground flex items-center gap-2 text-xs font-medium">
-              <Sparkles className="text-brand size-3.5" />
-              Credit balance
-            </div>
-            <div className="mt-2 flex items-baseline gap-1.5">
-              <span className="text-2xl font-semibold tracking-tight">
-                {credits}
-              </span>
-              <span className="text-muted-foreground text-xs">credits</span>
-            </div>
-            <div className="bg-surface-2 mt-3 h-1.5 overflow-hidden rounded-full">
-              <div
-                className="bg-brand h-full rounded-full"
-                style={{ width: `${creditPct}%` }}
-              />
-            </div>
-            <Link
-              href="/dashboard/billing"
-              className="bg-brand text-brand-foreground mt-4 flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-opacity hover:opacity-90"
-            >
-              <Coins className="size-3.5" /> Get more credits
-            </Link>
-          </div>
+          <CreditBalanceCard />
 
           {isAdmin && (
             <div className="px-3 pb-1">
@@ -260,13 +229,7 @@ export function DashboardShell({
                     <LogOut className="size-4" />
                   )}
                 </button>
-                <Link
-                  href="/dashboard/billing"
-                  className="border-border bg-surface hidden items-center gap-2 rounded-lg border px-3 py-1.5 md:flex"
-                >
-                  <Coins className="text-brand size-3.5" />
-                  <span className="text-sm font-medium">{credits} credits</span>
-                </Link>
+                <TopbarCreditsPill />
               </div>
             </div>
           </header>
@@ -300,5 +263,52 @@ export function DashboardShell({
         </div>
       </div>
     </div>
+  );
+}
+
+// Self-subscribing credit displays: only these two leaf components (not the
+// whole shell — sidebar, nav, topbar) re-render when the live-polled credit
+// balance changes.
+function CreditBalanceCard() {
+  const { data: credits = 0 } = useQueueStatus((d) => d.credits);
+  const creditPct = Math.max(0, Math.min(100, credits));
+  return (
+    <div className="border-border bg-surface m-3 rounded-2xl border p-4">
+      <div className="text-muted-foreground flex items-center gap-2 text-xs font-medium">
+        <Sparkles className="text-brand size-3.5" />
+        Credit balance
+      </div>
+      <div className="mt-2 flex items-baseline gap-1.5">
+        <span className="text-2xl font-semibold tracking-tight">
+          {credits}
+        </span>
+        <span className="text-muted-foreground text-xs">credits</span>
+      </div>
+      <div className="bg-surface-2 mt-3 h-1.5 overflow-hidden rounded-full">
+        <div
+          className="bg-brand h-full rounded-full"
+          style={{ width: `${creditPct}%` }}
+        />
+      </div>
+      <Link
+        href="/dashboard/billing"
+        className="bg-brand text-brand-foreground mt-4 flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-opacity hover:opacity-90"
+      >
+        <Coins className="size-3.5" /> Get more credits
+      </Link>
+    </div>
+  );
+}
+
+function TopbarCreditsPill() {
+  const { data: credits = 0 } = useQueueStatus((d) => d.credits);
+  return (
+    <Link
+      href="/dashboard/billing"
+      className="border-border bg-surface hidden items-center gap-2 rounded-lg border px-3 py-1.5 md:flex"
+    >
+      <Coins className="text-brand size-3.5" />
+      <span className="text-sm font-medium">{credits} credits</span>
+    </Link>
   );
 }

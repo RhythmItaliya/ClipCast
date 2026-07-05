@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { deleteAdminClip } from "~/actions/admin";
+import { useConfirm } from "~/components/ui/confirm-dialog";
 
 type AdminClip = {
   id: string;
@@ -19,12 +20,16 @@ type AdminClip = {
 };
 
 // Clip mode color accents
+// Clip modes / categories can also be AI-invented tags (e.g. "Hot Take")
+// from "any"/"all" jobs — anything not listed falls back to the neutral
+// badge style at the render site.
 const MODE_STYLES: Record<string, string> = {
   qa: "bg-blue-500/10 text-blue-600",
   highlights: "bg-brand-soft text-brand",
   motivational: "bg-orange-500/10 text-orange-600",
   educational: "bg-green-500/10 text-green-600",
   all: "bg-purple-500/10 text-purple-600",
+  any: "bg-purple-500/10 text-purple-600",
 };
 
 export function ClipsTable({
@@ -39,13 +44,20 @@ export function ClipsTable({
   pageSize: number;
 }) {
   const router = useRouter();
+  const confirmDialog = useConfirm();
   const [isPending, startTransition] = useTransition();
   const totalPages = Math.ceil(total / pageSize);
 
-  function handleDelete(clipId: string, s3Key: string) {
+  async function handleDelete(clipId: string, s3Key: string) {
     const name = s3Key.split("/").pop() ?? clipId;
-    if (!confirm(`Delete clip "${name}"? This only removes the DB record, not the S3 file.`))
-      return;
+    const ok = await confirmDialog({
+      title: `Delete clip "${name}"?`,
+      description:
+        "This only removes the database record, not the S3 file.",
+      confirmLabel: "Delete clip",
+      destructive: true,
+    });
+    if (!ok) return;
 
     startTransition(async () => {
       const res = await deleteAdminClip(clipId);

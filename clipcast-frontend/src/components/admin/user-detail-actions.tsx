@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { adjustUserCredits, setUserBanned, setUserRole } from "~/actions/admin";
+import { useConfirm } from "~/components/ui/confirm-dialog";
 
 export function UserDetailActions({
   userId,
@@ -16,6 +17,7 @@ export function UserDetailActions({
   banned: boolean;
 }) {
   const router = useRouter();
+  const confirmDialog = useConfirm();
   const [isPending, startTransition] = useTransition();
   const [creditDelta, setCreditDelta] = useState("");
 
@@ -37,7 +39,16 @@ export function UserDetailActions({
     });
   }
 
-  function handleBan(next: boolean) {
+  async function handleBan(next: boolean) {
+    const ok = await confirmDialog({
+      title: next ? "Ban this user?" : "Unban this user?",
+      description: next
+        ? "They will be signed out and unable to log in until unbanned."
+        : "They will be able to sign in again.",
+      confirmLabel: next ? "Ban user" : "Unban user",
+      destructive: next,
+    });
+    if (!ok) return;
     startTransition(async () => {
       const res = await setUserBanned(userId, next);
       if (res.success) {
@@ -49,7 +60,20 @@ export function UserDetailActions({
     });
   }
 
-  function handleRoleChange(next: "USER" | "ADMIN") {
+  async function handleRoleChange(next: "USER" | "ADMIN") {
+    const ok = await confirmDialog({
+      title:
+        next === "ADMIN"
+          ? "Promote this user to admin?"
+          : "Demote this user to regular user?",
+      description:
+        next === "ADMIN"
+          ? "They will get full access to the admin panel and every user's data."
+          : "They will lose all admin panel access.",
+      confirmLabel: next === "ADMIN" ? "Promote" : "Demote",
+      destructive: next !== "ADMIN",
+    });
+    if (!ok) return;
     startTransition(async () => {
       const res = await setUserRole(userId, next);
       if (res.success) {

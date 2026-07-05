@@ -19,6 +19,7 @@ import {
   setUserBanned,
   setUserRole,
 } from "~/actions/admin";
+import { useConfirm } from "~/components/ui/confirm-dialog";
 
 type AdminUser = {
   id: string;
@@ -122,6 +123,7 @@ export function UsersTable({
 // ── Single row with inline actions ───────────────────────────────────────────
 
 function UserRow({ user }: { user: AdminUser }) {
+  const confirmDialog = useConfirm();
   const [isPending, startTransition] = useTransition();
   const [creditDelta, setCreditDelta] = useState("");
   const [showCreditInput, setShowCreditInput] = useState(false);
@@ -148,7 +150,16 @@ function UserRow({ user }: { user: AdminUser }) {
   }
 
   // Ban / unban
-  function handleBan(banned: boolean) {
+  async function handleBan(banned: boolean) {
+    const ok = await confirmDialog({
+      title: banned ? `Ban ${user.email}?` : `Unban ${user.email}?`,
+      description: banned
+        ? "They will be signed out and unable to log in until unbanned."
+        : "They will be able to sign in again.",
+      confirmLabel: banned ? "Ban user" : "Unban user",
+      destructive: banned,
+    });
+    if (!ok) return;
     startTransition(async () => {
       const res = await setUserBanned(user.id, banned);
       if (res.success) {
@@ -160,7 +171,20 @@ function UserRow({ user }: { user: AdminUser }) {
   }
 
   // Role change
-  function handleRoleChange(role: "USER" | "ADMIN") {
+  async function handleRoleChange(role: "USER" | "ADMIN") {
+    const ok = await confirmDialog({
+      title:
+        role === "ADMIN"
+          ? `Promote ${user.email} to admin?`
+          : `Demote ${user.email} to regular user?`,
+      description:
+        role === "ADMIN"
+          ? "They will get full access to the admin panel and every user's data."
+          : "They will lose all admin panel access.",
+      confirmLabel: role === "ADMIN" ? "Promote" : "Demote",
+      destructive: role !== "ADMIN",
+    });
+    if (!ok) return;
     startTransition(async () => {
       const res = await setUserRole(user.id, role);
       if (res.success) {

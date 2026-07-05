@@ -10,28 +10,26 @@ import { QueueTable } from "~/components/dashboard/queue-table";
 import { Uploader } from "~/components/dashboard/uploader";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
-import { getQueueFiles } from "~/server/queue";
 
 export default async function DashboardPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
-  const [queueFiles, recentClips] = await Promise.all([
-    getQueueFiles(session.user.id),
-    db.clip.findMany({
-      where: { userId: session.user.id },
-      select: {
-        id: true,
-        s3Key: true,
-        clipMode: true,
-        title: true,
-        createdAt: true,
-        uploadedFile: { select: { displayName: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 3,
-    }),
-  ]);
+  // Queue/usage data comes from the dashboard-wide usage store (seeded in
+  // the layout) — this page only fetches what's unique to it.
+  const recentClips = await db.clip.findMany({
+    where: { userId: session.user.id },
+    select: {
+      id: true,
+      s3Key: true,
+      clipMode: true,
+      title: true,
+      createdAt: true,
+      uploadedFile: { select: { displayName: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 3,
+  });
 
   return (
     <div className="space-y-5">
@@ -130,7 +128,6 @@ export default async function DashboardPage() {
 
       {/* Queue (latest 3) */}
       <QueueTable
-        initialFiles={queueFiles}
         compact
         description="Latest 3 jobs — see all in Queue."
       />

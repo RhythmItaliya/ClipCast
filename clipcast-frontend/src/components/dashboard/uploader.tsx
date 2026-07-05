@@ -7,12 +7,14 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useRef, useState, type DragEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { processVideo, processYoutubeVideo } from "~/actions/generation";
 import { generateUploadUrl } from "~/actions/s3";
-import { useLiveUsage } from "~/components/dashboard/live-usage-stats";
+import {
+  useQueueStatus,
+  useRefreshQueueStatus,
+} from "~/hooks/use-queue-status";
 import {
   FRIENDLY_MESSAGES,
   getFriendlyErrorMessage,
@@ -26,11 +28,11 @@ const YT_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/;
 
 const CLIP_MODES = [
   { id: "all", label: "All" },
+  { id: "any", label: "Any" },
   { id: "qa", label: "Q&A" },
   { id: "educational", label: "Educational" },
   { id: "motivational", label: "Motivational" },
   { id: "highlights", label: "Highlights" },
-  { id: "others", label: "Others" },
 ] as const;
 
 export function Uploader() {
@@ -50,17 +52,20 @@ export function Uploader() {
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const router = useRouter();
 
-  // Client-side mirror of the server gates — instant feedback, server decides.
-  // Reads the same live-polled usage the queue table updates from, so a job
-  // that just finished frees up a slot here immediately, not just after a
-  // full page reload.
-  const live = useLiveUsage();
+  // Client-side mirror of the server gates — instant feedback, server
+  // decides. Selects just the three gate inputs; structural sharing means
+  // this only re-renders when one of them changes, not on queue updates.
+  const { data: live } = useQueueStatus((d) => ({
+    credits: d.credits,
+    uploadsToday: d.uploadsToday,
+    activeJobs: d.activeJobs,
+  }));
+  const refreshUsage = useRefreshQueueStatus();
   const blockReason = getUsageBlockReason({
-    creditsRemaining: live.credits,
-    uploadsToday: live.uploadsToday,
-    activeJobs: live.activeJobs,
+    creditsRemaining: live?.credits ?? 0,
+    uploadsToday: live?.uploadsToday ?? 0,
+    activeJobs: live?.activeJobs ?? 0,
   });
 
   const pickFile = (candidate: File | undefined) => {
@@ -166,7 +171,9 @@ export function Uploader() {
           duration: TOAST_DURATION_MEDIUM,
         });
       }
-      router.refresh();
+      // Refresh only the live usage/queue slice — the queue table and stat
+      // tiles pick the new job up without re-rendering the whole page.
+      void refreshUsage();
     } catch (e) {
       toast.error("Upload failed", { description: getFriendlyErrorMessage(e) });
     } finally {
@@ -208,7 +215,7 @@ export function Uploader() {
           "Your video is downloading and will be processed automatically.",
         duration: TOAST_DURATION_LONG,
       });
-      router.refresh();
+      void refreshUsage();
     } catch (e) {
       toast.error("Failed to queue YouTube video", {
         description: getFriendlyErrorMessage(e),

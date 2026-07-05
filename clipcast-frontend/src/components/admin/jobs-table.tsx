@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { resetAllStuckJobs, resetSingleJob } from "~/actions/admin";
+import { useConfirm } from "~/components/ui/confirm-dialog";
 
 type AdminJob = {
   id: string;
@@ -66,11 +67,19 @@ export function JobsTable({
   statusFilter?: string;
 }) {
   const router = useRouter();
+  const confirmDialog = useConfirm();
   const [isPending, startTransition] = useTransition();
   const totalPages = Math.ceil(total / pageSize);
 
-  function handleResetAll() {
-    if (!confirm("Reset ALL stuck (queued/processing) jobs to failed?")) return;
+  async function handleResetAll() {
+    const ok = await confirmDialog({
+      title: "Reset all stuck jobs?",
+      description:
+        "Every queued or processing job will be marked failed. Users can retry them afterwards.",
+      confirmLabel: "Reset all",
+      destructive: true,
+    });
+    if (!ok) return;
     startTransition(async () => {
       const res = await resetAllStuckJobs();
       if (res.success) {

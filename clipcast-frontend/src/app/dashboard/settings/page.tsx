@@ -21,6 +21,8 @@ export default async function SettingsPage() {
       notifyWeeklySummary: true,
       notifyJobFailed: true,
       notifyProductUpdates: true,
+      captionColor: true,
+      watermarkText: true,
     },
   });
   if (!user) redirect("/login");
@@ -34,6 +36,10 @@ export default async function SettingsPage() {
         weeklySummary: user.notifyWeeklySummary,
         jobFailed: user.notifyJobFailed,
         productUpdates: user.notifyProductUpdates,
+      }}
+      clipAppearance={{
+        captionColor: user.captionColor,
+        watermarkText: user.watermarkText,
       }}
     />
   );

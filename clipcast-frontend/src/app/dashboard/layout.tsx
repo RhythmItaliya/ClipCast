@@ -1,8 +1,14 @@
+import {
+  dehydrate,
+  HydrationBoundary,
+  QueryClient,
+} from "@tanstack/react-query";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { ForceLogout } from "~/components/force-logout";
 import { DashboardShell } from "~/components/dashboard/shell";
-import { LiveUsageProvider } from "~/components/dashboard/live-usage-stats";
+import { QueryProvider } from "~/components/query-provider";
+import { QUEUE_STATUS_KEY } from "~/hooks/use-queue-status";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 import { getQueueFiles } from "~/server/queue";
@@ -32,24 +38,30 @@ export default async function DashboardLayout({
     return <ForceLogout />;
   }
 
+  // Seed TanStack Query's cache server-side with the same shape
+  // /api/queue-status returns, so the first client paint has live data with
+  // no loading state and no duplicate fetch. From then on the shared
+  // useQueueStatus query owns polling; every dashboard section subscribes
+  // to just the slice it renders.
+  const queryClient = new QueryClient();
+  queryClient.setQueryData(QUEUE_STATUS_KEY, {
+    uploadedFiles: queueFiles,
+    credits: usage.creditsRemaining,
+    uploadsToday: usage.uploadsToday,
+    activeJobs: usage.activeJobs,
+  });
+
   return (
-    // Mounted once here (not per-page) so every credit/usage display in the
-    // whole dashboard — sidebar, topbar, Overview's hero, the queue table —
-    // shares this single poll instead of each maintaining its own
-    // independent snapshot that can drift out of sync with the others.
-    <LiveUsageProvider
-      initialCredits={usage.creditsRemaining}
-      initialUploadsToday={usage.uploadsToday}
-      initialActiveJobs={usage.activeJobs}
-      initialFiles={queueFiles}
-    >
-      <DashboardShell
-        email={user.email}
-        name={user.name}
-        isAdmin={session.user.role === "ADMIN"}
-      >
-        {children}
-      </DashboardShell>
-    </LiveUsageProvider>
+    <QueryProvider>
+      <HydrationBoundary state={dehydrate(queryClient)}>
+        <DashboardShell
+          email={user.email}
+          name={user.name}
+          isAdmin={session.user.role === "ADMIN"}
+        >
+          {children}
+        </DashboardShell>
+      </HydrationBoundary>
+    </QueryProvider>
   );
 }
