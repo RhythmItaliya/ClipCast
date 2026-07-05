@@ -104,6 +104,12 @@ model User {
     notifyJobFailed       Boolean @default(true)
     notifyProductUpdates  Boolean @default(false)
 
+    // Clip appearance: active-word caption highlight color ("#RRGGBB",
+    // null = brand default) and an optional personal watermark burned into
+    // clips (null/empty = no watermark at all).
+    captionColor  String?
+    watermarkText String?
+
     createdAt DateTime @default(now())
     updatedAt DateTime @default(now()) @updatedAt
 }
