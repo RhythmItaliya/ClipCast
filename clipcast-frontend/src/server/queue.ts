@@ -36,8 +36,8 @@ export function toQueueFile(file: QueueFileRow): QueueFile {
     errorMessage: file.errorMessage ?? null,
     processingSummary: file.processingSummary ?? null,
     clipsCount: file._count.clips,
-    createdAt: file.createdAt,
-    updatedAt: file.updatedAt,
+    createdAt: file.createdAt.toISOString(),
+    updatedAt: file.updatedAt.toISOString(),
   };
 }
 

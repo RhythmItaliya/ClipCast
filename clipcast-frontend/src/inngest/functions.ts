@@ -74,13 +74,19 @@ export const processVideoFn = inngest.createFunction(
       (event.data as { previewOnly?: boolean }).previewOnly ?? false;
 
     try {
-      const { userId, credits, s3Key } = await step.run(
-        "check-credits",
-        async () => {
+      const { userId, credits, s3Key, captionColor, watermarkText } =
+        await step.run("check-credits", async () => {
           const uploadedFile = await db.uploadedFile.findUniqueOrThrow({
             where: { id: uploadedFileId },
             select: {
-              user: { select: { id: true, credits: true } },
+              user: {
+                select: {
+                  id: true,
+                  credits: true,
+                  captionColor: true,
+                  watermarkText: true,
+                },
+              },
               s3Key: true,
             },
           });
@@ -88,9 +94,10 @@ export const processVideoFn = inngest.createFunction(
             userId: uploadedFile.user.id,
             credits: uploadedFile.user.credits,
             s3Key: uploadedFile.s3Key,
+            captionColor: uploadedFile.user.captionColor,
+            watermarkText: uploadedFile.user.watermarkText,
           };
-        },
-      );
+        });
 
       // Inngest memoizes completed steps: on replay (which happens after
       // every step.sleep/step.fetch below), this callback is NOT re-invoked,
@@ -283,6 +290,11 @@ export const processVideoFn = inngest.createFunction(
             youtube_url: null,
             clip_mode: clipMode,
             preview_only: previewOnly,
+            // Per-user clip appearance: caption highlight color (null =
+            // brand default) and optional personal watermark (null = no
+            // watermark burned at all).
+            caption_color: captionColor,
+            watermark_text: watermarkText,
           }),
           headers: {
             "Content-Type": "application/json",
@@ -312,7 +324,7 @@ export const processVideoFn = inngest.createFunction(
             duration?: number;
             // Only populated when the job ran in "all" mode — the specific
             // category (Q&A / Educational / Motivational / Highlights, or
-            // an AI-invented "Others" label) that particular clip was found
+            // an AI-invented tag from the "any" pass) that clip was found
             // under. Null for a job submitted with one single fixed mode.
             category?: string | null;
           }[];

@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { v4 as uuidv4 } from "uuid";
 import { inngest } from "~/inngest/client";
 import { auth } from "~/server/auth";
@@ -93,7 +92,10 @@ export async function processVideo(
     previewOnly,
   });
 
-  revalidatePath("/dashboard");
+  // No revalidatePath: the dashboard reads queue/credits from the shared
+  // TanStack Query cache, which the client refreshes after this action —
+  // revalidating here would force a full-page RSC re-render for data the
+  // client already updates in place.
   return sent
     ? { success: true }
     : {
@@ -154,7 +156,6 @@ export async function processYoutubeVideo(
     previewOnly,
   });
 
-  revalidatePath("/dashboard");
   return sent
     ? { success: true }
     : {
@@ -184,7 +185,6 @@ export async function clearQueueItem(fileId: string): Promise<ActionResult> {
 
     await db.uploadedFile.delete({ where: { id: fileId } });
 
-    revalidatePath("/dashboard");
     return { success: true };
   } catch {
     return { success: false, error: "Failed to clear queue item." };

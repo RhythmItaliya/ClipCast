@@ -11,7 +11,7 @@
 export const CREDITS_PER_MINUTE = 1;
 
 // "All" mode fans out over every category (Q&A, Educational, Motivational,
-// Highlights, Others) — roughly 5x the Gemini calls of a single-mode job —
+// Highlights, Any) — roughly 5x the Gemini calls of a single-mode job —
 // so it carries a surcharge rather than billing the same as a single-mode
 // job that does 1/5th the AI work.
 export const ALL_MODE_SURCHARGE_MULTIPLIER = 1.5;

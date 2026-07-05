@@ -131,6 +131,40 @@ export async function updateNotificationPref(
 }
 
 /**
+ * Persists the clip-appearance settings: the caption highlight color
+ * (null = brand default) and the optional watermark text (null/empty = no
+ * watermark burned into clips).
+ */
+export async function updateClipAppearance(opts: {
+  captionColor: string | null;
+  watermarkText: string | null;
+}): Promise<ActionResult> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return {
+      success: false,
+      error: "Your session has expired. Please log in again.",
+    };
+  }
+
+  const color = opts.captionColor?.trim() ?? null;
+  if (color !== null && !/^#[0-9a-fA-F]{6}$/.test(color)) {
+    return { success: false, error: "Pick a valid color." };
+  }
+  const watermark = opts.watermarkText?.trim().slice(0, 40) || null;
+
+  try {
+    await db.user.update({
+      where: { id: session.user.id },
+      data: { captionColor: color, watermarkText: watermark },
+    });
+    return { success: true };
+  } catch {
+    return { success: false, error: "Could not save clip appearance." };
+  }
+}
+
+/**
  * Permanently delete the signed-in user's account. Uploaded files, clips,
  * OAuth accounts and sessions are removed via cascading deletes.
  */
