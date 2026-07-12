@@ -16,6 +16,15 @@ Open any of them at [excalidraw.com](https://excalidraw.com) → menu → **Open
 | 08 | [DFD — Level 0 (Context)](08-dfd-level0-context.excalidraw) | The whole system as a single process, with every external entity it exchanges data with. |
 | 09 | [DFD — Level 1](09-dfd-level1.excalidraw) | Process 0 decomposed into its 5 major sub-processes and their data stores. |
 
+## Regenerating
+
+Every file here is produced by [`generate_diagrams.py`](generate_diagrams.py)
+from the **current** architecture (TanStack data layer, credit ledger, email
+OTP, caption pills, Any/All clip modes, daily auto-clip cron). When the
+system changes, edit the specs in that script and re-run:
+
+    python3 docs/diagrams/generate_diagrams.py
+
 ## How these relate to the other docs folders
 
 - [`../excalidraw/`](../excalidraw/) has informal architecture/flow diagrams

@@ -348,3 +348,13 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str):
 
 [07-billing-and-credits.md](07-billing-and-credits.md): how the user pays for
 all this.
+
+## Deeper dives
+
+- Clip modes, the All fan-out, the open-ended Any mode, per-clip AI category
+  tags, Gemini/HF fallback: **doc 13**.
+- Burned captions (word-level pill highlight, font-metrics math, the Modal
+  render-test harness) and per-user caption color / watermark: **doc 12**.
+- The downloader app also exposes `get_youtube_duration`, a download-free
+  metadata probe the frontend uses to gate credits before committing to the
+  full pipeline (doc 05).

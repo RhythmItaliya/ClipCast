@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getClipThumbnailUrls } from "~/actions/clips";
-import { ClipsGrid, type ClipGroup } from "~/components/dashboard/clips-grid";
+import { ClipsGrid } from "~/components/dashboard/clips-grid";
+import type { ClipGroup } from "~/types";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 

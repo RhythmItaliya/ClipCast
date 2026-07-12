@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import type { QueueFile } from "~/components/dashboard/queue-table";
+import type { QueueFile } from "~/types";
 import { db } from "~/server/db";
 
 /** Shared shape for every place that renders a `QueueTable` (dashboard

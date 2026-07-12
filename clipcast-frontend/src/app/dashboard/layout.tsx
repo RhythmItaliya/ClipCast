@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { ForceLogout } from "~/components/force-logout";
 import { DashboardShell } from "~/components/dashboard/shell";
 import { QueryProvider } from "~/components/query-provider";
-import { QUEUE_STATUS_KEY } from "~/hooks/use-queue-status";
+import { QUEUE_STATUS_KEY } from "~/lib/queue-status";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 import { getQueueFiles } from "~/server/queue";

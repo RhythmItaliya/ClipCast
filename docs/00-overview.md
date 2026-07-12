@@ -85,3 +85,10 @@ ClipCast/
 7. [07-billing-and-credits.md](07-billing-and-credits.md): Stripe, credits, the purchase ledger
 8. [08-admin-panel.md](08-admin-panel.md): admin panel and audit log
 9. [09-deployment.md](09-deployment.md): deploying both halves for real
+
+Deep dives (read after the tour above):
+
+10. [10-realtime-data-and-state.md](10-realtime-data-and-state.md): TanStack Query layer — live dashboard data without whole-page re-renders
+11. [11-notifications-and-email.md](11-notifications-and-email.md): SMTP/Resend transport, queued sends via Inngest, email OTP sign-in
+12. [12-captions-and-branding.md](12-captions-and-branding.md): word-level caption pills, font-metric math, per-user color & watermark
+13. [13-clip-modes-and-ai.md](13-clip-modes-and-ai.md): mode prompts, the All fan-out, open-ended Any mode, daily auto-clip cron

@@ -10,7 +10,7 @@ const stripe = new Stripe(env.STRIPE_SECRET_KEY, {
   apiVersion: "2026-04-22.dahlia",
 });
 
-export type PriceId = "small" | "medium" | "large";
+import type { CreditTransactionRow, PriceId } from "~/types";
 
 const PRICE_IDS: Record<PriceId, string> = {
   small: env.STRIPE_SMALL_CREDIT_PACK,
@@ -46,15 +46,6 @@ export async function createCheckoutSession(priceId: PriceId) {
 
   redirect(session.url);
 }
-
-export type CreditTransactionRow = {
-  id: string;
-  type: string;
-  amount: number;
-  balanceAfter: number;
-  description: string | null;
-  createdAt: Date;
-};
 
 /** The signed-in user's own credit ledger — purchases and job charges, newest first. */
 export async function getMyCreditTransactions(): Promise<CreditTransactionRow[]> {

@@ -8,7 +8,7 @@ import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 import { YOUTUBE_TOKEN_REFRESH_THRESHOLD_MS } from "~/lib/utils";
 
-export type PendingYouTubeChannel = { id: string; title: string };
+import type { PendingYouTubeChannel, YouTubeVideo } from "~/types";
 
 // ── OAuth helpers ────────────────────────────────────────────────────────────
 const SCOPES = [
@@ -365,16 +365,6 @@ export async function uploadClipToYouTube(
 }
 
 // ── Channel videos ───────────────────────────────────────────────────────────
-export type YouTubeVideo = {
-  id: string;
-  title: string;
-  description: string;
-  thumbnailUrl: string;
-  publishedAt: string;
-  duration: string;
-  viewCount: string;
-  url: string;
-};
 
 export async function getChannelVideos(
   maxResults = 12,

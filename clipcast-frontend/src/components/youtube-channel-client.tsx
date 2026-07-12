@@ -22,9 +22,8 @@ import {
   getYouTubeAuthUrl,
   selectYouTubeChannel,
   setYouTubeAutoClip,
-  type PendingYouTubeChannel,
-  type YouTubeVideo,
 } from "~/actions/youtube";
+import type { PendingYouTubeChannel, YouTubeVideo } from "~/types";
 import {
   getFriendlyErrorMessage,
   isOffline,

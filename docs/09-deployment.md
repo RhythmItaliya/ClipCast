@@ -118,3 +118,15 @@ of the startup.
 the Modal split (see [06-video-processing-pipeline.md](06-video-processing-pipeline.md)).
 Every video-processing test, even in local development, hits the real deployed
 Modal endpoints.
+
+## Later additions
+
+- `bash deploy.sh {all|processor|downloader}` from `clipcast-backend/` is
+  the only deploy command needed; Modal keeps stable URLs across deploys.
+- New downloader web function `get_youtube_duration` → set its URL as
+  `YOUTUBE_DURATION_ENDPOINT` in `.env`.
+- Caption styling changes: render frames first with
+  `scripts/render_caption_test.py` (cheap Modal CPU run) instead of
+  deploying the GPU app to look at output.
+- After any `prisma db push`, restart `next dev` — a running server keeps
+  the old Prisma client in memory and throws `Unknown field` errors.

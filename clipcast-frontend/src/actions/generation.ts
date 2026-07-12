@@ -5,8 +5,8 @@ import { inngest } from "~/inngest/client";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 import { checkUsageLimits } from "~/server/usage";
+import type { ActionResult } from "~/types";
 
-type ActionResult = { success: boolean; error?: string };
 
 /**
  * Fire the processing event. If the queue is unreachable the job is marked

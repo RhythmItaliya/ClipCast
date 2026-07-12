@@ -20,17 +20,7 @@ import {
   setUserRole,
 } from "~/actions/admin";
 import { useConfirm } from "~/components/ui/confirm-dialog";
-
-type AdminUser = {
-  id: string;
-  name: string | null;
-  email: string;
-  role: "USER" | "ADMIN";
-  banned: boolean;
-  credits: number;
-  createdAt: Date;
-  _count: { clips: number; uploadedFiles: number };
-};
+import type { AdminUser } from "~/types";
 
 export function UsersTable({
   users,

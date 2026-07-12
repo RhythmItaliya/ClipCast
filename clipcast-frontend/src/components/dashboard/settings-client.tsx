@@ -10,26 +10,18 @@ import {
   updateClipAppearance,
   updateNotificationPref,
   updateProfile,
-  type NotificationPref,
 } from "~/actions/auth";
+import type {
+  ClipAppearance,
+  NotificationPref,
+  NotificationPrefs,
+} from "~/types";
 import { useConfirm } from "~/components/ui/confirm-dialog";
 import {
   FRIENDLY_MESSAGES,
   getFriendlyErrorMessage,
   isOffline,
 } from "~/lib/errors";
-
-export type NotificationPrefs = {
-  clipReady: boolean;
-  weeklySummary: boolean;
-  jobFailed: boolean;
-  productUpdates: boolean;
-};
-
-export type ClipAppearance = {
-  captionColor: string | null;
-  watermarkText: string | null;
-};
 
 export function SettingsClient({
   name,

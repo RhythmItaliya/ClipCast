@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 import { env } from "~/env";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
+import type { ActionResult } from "~/types";
 
 function s3Client() {
   return new S3Client({
@@ -105,7 +106,6 @@ export async function getClipThumbnailUrls(
   return Object.fromEntries(entries.filter((e): e is readonly [string, string] => e !== null));
 }
 
-type ActionResult = { success: boolean; error?: string };
 
 /** Delete a clip: removes the S3 object (best-effort) and the DB record. */
 export async function deleteClip(clipId: string): Promise<ActionResult> {

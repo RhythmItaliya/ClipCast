@@ -3,8 +3,8 @@
 import { db } from "~/server/db";
 import { otpEmailHtml, queueEmail } from "~/server/mail";
 import { createLoginOtp } from "~/server/otp";
+import type { ActionResult } from "~/types";
 
-type ActionResult = { success: boolean; error?: string };
 
 /**
  * Requests a sign-in code emailed to the given address. Always returns

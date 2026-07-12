@@ -3,7 +3,8 @@
 import { Check, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { createCheckoutSession, type PriceId } from "~/actions/stripe";
+import { createCheckoutSession } from "~/actions/stripe";
+import type { PriceId } from "~/types";
 import {
   FRIENDLY_MESSAGES,
   getFriendlyErrorMessage,

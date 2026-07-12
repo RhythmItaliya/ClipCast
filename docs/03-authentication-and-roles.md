@@ -201,3 +201,14 @@ second query to look up the admin's email.
 
 [04-frontend-app-structure.md](04-frontend-app-structure.md): how the rest of
 the app is organized around this.
+
+## Email OTP sign-in (second method)
+
+A fourth provider, `CredentialsProvider({ id: "email-otp" })`: the login
+page's "Sign in with a code instead" modal calls the `requestLoginOtp`
+action (which emails a 6-digit code — never reveals whether the address has
+an account, 60s resend cooldown), then `signIn("email-otp", { email, code })`.
+Verification happens **inside** `authorize()` via
+`verifyAndConsumeLoginOtp` (`src/server/otp.ts`): bcrypt compare, 10-min
+expiry, 5 attempts, single-use. Banned users are rejected on every provider.
+Full flow: doc 11.

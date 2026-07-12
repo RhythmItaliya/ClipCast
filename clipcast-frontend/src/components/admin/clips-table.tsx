@@ -6,18 +6,7 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { deleteAdminClip } from "~/actions/admin";
 import { useConfirm } from "~/components/ui/confirm-dialog";
-
-type AdminClip = {
-  id: string;
-  s3Key: string;
-  clipMode: string;
-  isPreview: boolean;
-  title: string | null;
-  duration: number | null;
-  createdAt: Date;
-  user: { id: string; email: string; name: string | null };
-  uploadedFile: { displayName: string | null } | null;
-};
+import type { AdminClip } from "~/types";
 
 // Clip mode color accents
 // Clip modes / categories can also be AI-invented tags (e.g. "Hot Take")

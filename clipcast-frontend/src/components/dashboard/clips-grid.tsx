@@ -25,17 +25,7 @@ import {
   getFriendlyErrorMessage,
   isOffline,
 } from "~/lib/errors";
-
-export type ClipItem = {
-  id: string;
-  title: string;
-  clipMode: string;
-  isPreview: boolean;
-  duration?: number | null;
-  thumbnailUrl?: string | null;
-  createdAt: string;
-  youtubeVideoId?: string | null;
-};
+import type { ClipGroup, ClipItem } from "~/types";
 
 /** Formats seconds as "m:ss" for the duration badge. */
 function formatDuration(seconds: number): string {
@@ -43,12 +33,6 @@ function formatDuration(seconds: number): string {
   const s = Math.round(seconds % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
 }
-
-export type ClipGroup = {
-  id: string;
-  title: string;
-  clips: ClipItem[];
-};
 
 const THUMB_GRADIENTS = [
   "from-indigo-500 via-purple-500 to-pink-500",

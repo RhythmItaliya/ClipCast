@@ -245,3 +245,26 @@ traces one job through every hop described above, numbered in order.
 
 [06-video-processing-pipeline.md](06-video-processing-pipeline.md): what
 happens once Modal receives the call.
+
+## Duration is known before money is committed
+
+Both intake paths now resolve a real duration up front so the credit gate
+(`creditsForDuration`, doc 07) checks actual cost instead of a guess:
+
+- **Direct upload**: the browser reads the file's duration from a temporary
+  `<video>` element (metadata only, instant) and `processVideo` stores it on
+  the `UploadedFile` before the Inngest event fires.
+- **YouTube**: the Inngest function calls Modal's `get_youtube_duration`
+  (yt-dlp `--skip-download` through the proxy pool, a few seconds, no video
+  bytes). A 4-hour video on a 20-credit balance is now rejected as
+  `no credits` before any download/GPU spend. Probe failure degrades to the
+  old minimum-credit gate instead of blocking the job.
+
+The real charge is still trued-up from the duration Modal measures after
+processing, clamped so a balance never goes negative.
+
+## Live queue state
+
+The queue table, credits displays and uploader gates all read one TanStack
+Query (`useQueueStatus`) seeded server-side in the dashboard layout —
+polling, re-render behavior and mutation refresh rules are in doc 10.

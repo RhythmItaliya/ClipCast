@@ -146,3 +146,14 @@ and a paired skeleton.
 ## Next
 
 [09-deployment.md](09-deployment.md): putting both halves somewhere real.
+
+## Safety & consistency notes
+
+Every destructive or high-impact action (ban/unban, promote/demote, delete
+clip, reset all stuck jobs) goes through the shared themed confirm dialog
+(`useConfirm`) — no native browser popups, no single-click bans. Admin
+mutations write `AdminAuditLog` rows and `revalidatePath` only the admin
+routes; the user detail page also shows the target user's full credit
+ledger. Admin stays server-rendered (URL pagination + server actions) by
+design — nothing polls here, so the dashboard's TanStack layer (doc 10)
+is intentionally not used.

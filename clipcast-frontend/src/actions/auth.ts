@@ -7,12 +7,9 @@ import { db } from "~/server/db";
 import Stripe from "stripe";
 import { env } from "~/env";
 
-type SignupResult = {
-  success: boolean;
-  error?: string;
-};
+import type { ActionResult, NotificationPref } from "~/types";
 
-export async function signUp(data: SignupFormValues): Promise<SignupResult> {
+export async function signUp(data: SignupFormValues): Promise<ActionResult> {
   const validationResult = signupSchema.safeParse(data);
   if (!validationResult.success) {
     return {
@@ -68,8 +65,6 @@ export async function signUp(data: SignupFormValues): Promise<SignupResult> {
   }
 }
 
-type ActionResult = { success: boolean; error?: string };
-
 /** Update the signed-in user's display name. */
 export async function updateProfile(name: string): Promise<ActionResult> {
   const session = await auth();
@@ -102,9 +97,7 @@ const NOTIFICATION_FIELDS = {
   weeklySummary: "notifyWeeklySummary",
   jobFailed: "notifyJobFailed",
   productUpdates: "notifyProductUpdates",
-} as const;
-
-export type NotificationPref = keyof typeof NOTIFICATION_FIELDS;
+} as const satisfies Record<NotificationPref, string>;
 
 /** Persists a single notification toggle from the Settings page. */
 export async function updateNotificationPref(

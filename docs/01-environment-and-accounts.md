@@ -170,3 +170,14 @@ boot instead of a confusing failure three requests later.
 ## Next
 
 [02-database-schema.md](02-database-schema.md): set up Postgres with Prisma.
+
+## Email & duration-probe variables (added later)
+
+| Var | Purpose |
+|---|---|
+| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` | Primary mail transport (Gmail + app password works). From is forced to the SMTP user. |
+| `RESEND_API_KEY` / `EMAIL_FROM` | Fallback mail transport when SMTP is unset. Neither set = emails just log to console. |
+| `YOUTUBE_DURATION_ENDPOINT` | Modal `get_youtube_duration` URL — download-free duration probe used to gate credits before the real download. Optional: unset falls back to the old 1-credit minimum gate. |
+
+All mail is sent through Inngest (`email/send` events), never inline — see
+doc 11.

@@ -6,7 +6,10 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { useCallback } from "react";
-import type { QueueFile } from "~/components/dashboard/queue-table";
+import {
+  QUEUE_STATUS_KEY,
+  type QueueStatusData,
+} from "~/lib/queue-status";
 
 /**
  * The one shared server-state query for the whole dashboard: credits, usage
@@ -16,16 +19,11 @@ import type { QueueFile } from "~/components/dashboard/queue-table";
  * files, ...). Combined with TanStack Query's structural sharing, that means
  * a poll tick where nothing changed re-renders nothing, and a queue-only
  * change doesn't touch credit displays (and vice versa).
+ *
+ * The query key + data type live in ~/lib/queue-status (a server-safe
+ * module) because the dashboard layout also needs them server-side to seed
+ * the cache.
  */
-
-export type QueueStatusData = {
-  uploadedFiles: QueueFile[];
-  credits: number;
-  uploadsToday: number;
-  activeJobs: number;
-};
-
-export const QUEUE_STATUS_KEY = ["queue-status"] as const;
 
 async function fetchQueueStatus(): Promise<QueueStatusData> {
   const res = await fetch("/api/queue-status");

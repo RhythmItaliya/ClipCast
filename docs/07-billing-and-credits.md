@@ -157,3 +157,20 @@ webhook idempotent.
 
 [08-admin-panel.md](08-admin-panel.md): the operational side, managing users,
 jobs, clips, revenue, and an audit trail of what admins have done.
+
+## Pricing modifiers & the ledger (current rules)
+
+`src/lib/credits.ts` is the single source of truth:
+`creditsForDuration(seconds, { clipMode, isPreview })` — 1 credit/min
+rounded up, 1-credit floor even for unknown durations, a 0.05s jitter
+allowance so an exactly-3:00 video never bills as 4 minutes, **x1.5 for
+"All" mode** (it fans out ~5 Gemini passes) and **x0.5 for preview jobs**
+(480p, no speaker detection). Both the upfront gate and the final deduction
+call it; deductions are clamped at a 0 balance.
+
+Every balance change writes a `CreditTransaction` row (signed amount +
+`balanceAfter`): Stripe purchases (inside one `$transaction` with the
+increment and the `Purchase` row — a partial failure can't credit without a
+ledger trace), job charges, and admin adjustments. Users see it on
+Billing → Transaction history; admins see any user's ledger on the user
+detail page.

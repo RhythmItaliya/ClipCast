@@ -13,22 +13,7 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { resetAllStuckJobs, resetSingleJob } from "~/actions/admin";
 import { useConfirm } from "~/components/ui/confirm-dialog";
-
-type AdminJob = {
-  id: string;
-  displayName: string | null;
-  youtubeUrl: string | null;
-  status: string;
-  clipMode: string | null;
-  isPreview: boolean | null;
-  errorMessage: string | null;
-  internalErrorDetail: string | null;
-  processingSummary: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  _count: { clips: number };
-  user: { id: string; email: string; name: string | null };
-};
+import type { AdminJob } from "~/types";
 
 const STATUS_STYLES: Record<string, { label: string; classes: string; icon: React.ReactNode }> = {
   queued: {

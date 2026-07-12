@@ -51,6 +51,36 @@ lists). When adding a new data-fetching page, add its skeleton and
 `loading.tsx` in the same change; don't ship a page that flashes blank while
 its query runs.
 
+## Shared types (`src/types/`)
+
+All shared/domain types live in `src/types/`, split by domain and re-exported
+from `src/types/index.ts` so consumers just `import type { ... } from
+"~/types"`:
+
+- `api.ts` — `ActionResult`, the standard `{ success, error? }` shape every
+  server action returns.
+- `queue.ts` — `QueueFile` and `QueueStatusData`, mirroring the
+  `/api/queue-status` JSON payload exactly (dates as ISO strings).
+- `clips.ts` — `ClipItem`, `ClipGroup` for the clips grid.
+- `youtube.ts` — `PendingYouTubeChannel`, `YouTubeVideo`.
+- `billing.ts` — `PriceId`, `CreditTransactionRow`.
+- `settings.ts` — `NotificationPref(s)`, `ClipAppearance`.
+- `admin.ts` — `AdminUser`, `AdminJob`, `AdminClip` row shapes, mirroring the
+  selects in `src/actions/admin.ts`.
+
+Two rules:
+
+1. A type used by more than one module, or crossing the server/client
+   boundary, belongs here. Purely local component prop types stay next to
+   their component.
+2. Never export shared runtime values or types from a `"use client"` or
+   `"use server"` file for other modules to import. Type imports are erased
+   and technically safe, but a **value** imported from a client module into a
+   server component becomes a client-reference proxy and throws at request
+   time (this exact mistake once took down `/dashboard`). Shared constants
+   that both sides need (like the TanStack Query key in
+   `src/lib/queue-status.ts`) go in a plain module with no directive.
+
 ## Styling
 
 Tailwind CSS v4 with design tokens in `src/styles/globals.css`

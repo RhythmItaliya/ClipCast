@@ -328,3 +328,25 @@ db.user.findFirst({ select: { /* your shape */ } }).then(r => { console.log(r); 
 
 [03-authentication-and-roles.md](03-authentication-and-roles.md): wiring
 NextAuth on top of this schema.
+
+## Later additions
+
+- **User**: `notifyClipReady/WeeklySummary/JobFailed/ProductUpdates`
+  (Settings toggles the mailer respects), `captionColor` + `watermarkText`
+  (clip appearance, doc 12), `youtubeAutoClip` (daily cron opt-in),
+  `createdAt`/`updatedAt`.
+- **LoginOtp**: email sign-in codes — bcrypt `codeHash`, `expiresAt`,
+  single-use `consumedAt`, `attempts` cap. Separate from NextAuth's
+  `VerificationToken` on purpose (that model has no attempt limiting).
+- **CreditTransaction**: the full credit ledger — signed `amount`,
+  denormalized `balanceAfter`, `type` in `purchase | job_charge |
+  admin_adjust`, optional `uploadedFileId`/`purchaseId` refs. Written
+  atomically with the balance change (Stripe webhook uses one
+  `$transaction`).
+- **Purchase**: one row per completed Stripe checkout
+  (`stripeSessionId` unique = webhook idempotency key).
+- **AdminAuditLog**: every admin mutation; `adminId` is `SetNull` so the
+  trail outlives deleted admin accounts.
+- **Clip**: `title`, `thumbnailS3Key`, `duration`, and
+  `youtubeVideoId`/`youtubeUploadedAt` (set once a clip is posted back to
+  the user's channel — blocks double-uploads).

@@ -27,23 +27,7 @@ import {
   useQueueStatus,
   useRefreshQueueStatus,
 } from "~/hooks/use-queue-status";
-
-export type QueueFile = {
-  id: string;
-  s3Key: string;
-  filename: string;
-  youtubeUrl: string | null;
-  status: string;
-  clipMode: string | null;
-  isPreview: boolean | null;
-  clipsCount: number;
-  errorMessage: string | null;
-  processingSummary: string | null;
-  // ISO strings — this type mirrors the /api/queue-status JSON payload
-  // exactly so the same shape flows from server seed to client cache.
-  createdAt: string;
-  updatedAt: string;
-};
+import type { QueueFile } from "~/types";
 
 const BADGES: Record<string, { label: string; className: string }> = {
   queued: {

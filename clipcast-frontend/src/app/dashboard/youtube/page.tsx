@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
 import { YouTubeChannelClient } from "~/components/youtube-channel-client";
-import type { PendingYouTubeChannel } from "~/actions/youtube";
+import type { PendingYouTubeChannel } from "~/types";
 
 export default async function YouTubePage({
   searchParams,
