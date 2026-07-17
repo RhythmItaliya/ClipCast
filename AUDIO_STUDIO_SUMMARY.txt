@@ -1,0 +1,443 @@
+================================================================================
+CLIPCAST — AUDIO STUDIO FEATURE : WHAT WAS BUILT (SUMMARY)
+================================================================================
+Date: 2026-07-12
+Feature: A new "Audio Studio" mode = (1) AI music generation, and (2) AI-driven
+beat-matched MASHUPS of two YouTube songs (Hindi x English style), with DJ
+transitions, vocal ducking, AI arrangement, and an audio-quality rating loop.
+
+Everything is ADDITIVE. The existing clip pipeline was NOT changed. All new
+tools install INSIDE the Modal image on deploy — nothing new installs on your
+machine.
+
+--------------------------------------------------------------------------------
+1) DOCUMENTATION (docs/)
+--------------------------------------------------------------------------------
+- docs/14-audio-studio-mode.md ......... Full end-to-end plan + open-source tool
+                                         stack + genre presets + build order.
+- docs/15-mashup-mixing-mechanics.md ... Plain-language "how we join two songs"
+                                         (stem swap, beat/key match, transitions,
+                                         making a new beat). No music knowledge
+                                         needed.
+- docs/16-ai-arrangement-and-audio-rating.md
+                                         The AI half (BUILT): Gemini arrangement
+                                         brain + Audiobox-Aesthetics rating loop.
+- docs/README.md, docs/00-overview.md .. Index links updated for 14/15/16.
+
+--------------------------------------------------------------------------------
+2) BACKEND — NEW ISOLATED MODAL APP  (clipcast-backend/apps/mixer/)
+--------------------------------------------------------------------------------
+Fully independent of the processor/downloader apps (own image, own torch pin,
+own Modal app name "clipcast-mixer"). CANNOT affect the clip pipeline.
+
+- main.py .............. One warm GPU container (@app.cls ClipCastMixer):
+                          * @modal.enter() keeps Gemini + Audiobox rater warm.
+                          * MASHUP: Demucs htdemucs_ft (best vocal split) ->
+                            BPM/key analysis -> Rubber Band tempo-stretch +
+                            Camelot key-shift -> AI arrangement (Gemini decides
+                            which vocal part lands where + DJ ducking + intro
+                            build) -> RATING LOOP (render, score with Audiobox
+                            Production-Quality, re-render, keep best take) ->
+                            loudness master -> S3 (mp3 + wav).
+                          * GENERATE: MusicGen medium + genre presets -> master.
+                          * Tiny CPU endpoint = submit/poll router (same contract
+                            as the downloader) that spawns the warm class method.
+- audio_engine.py ...... Pure, CPU-testable DSP + music logic:
+                          BPM/beat detection, key detection, Camelot harmonic
+                          matching, tempo folding, section detection, sidechain
+                          duck_bed, crossfade, high/low-pass filters,
+                          render_mashup, rating-feedback param back-off,
+                          loudness normalize, WAV/MP3 write.
+- test_audio_engine.py . 11 CPU smoke tests — ALL PASS (no GPU/network needed).
+- requirements.txt ..... torch 2.4.1, demucs, librosa, scipy, pyrubberband,
+                          pyloudnorm, audiobox_aesthetics, google-genai,
+                          transformers, boto3, fastapi, modal.
+- deploy.sh ............ mirrors the other apps' deploy scripts.
+- README.md ............ app docs + limitations + how to test without a GPU.
+
+Reused from existing system: the YouTube downloader app (for both mashup
+tracks), the clipcast-secret Modal secret, PROCESS_VIDEO_ENDPOINT_AUTH bearer
+token, S3_BUCKET_NAME, and GEMINI_API_KEY. NO new secrets.
+
+--------------------------------------------------------------------------------
+3) FRONTEND / QUEUE / DB  (clipcast-frontend/)  — all additive
+--------------------------------------------------------------------------------
+- prisma/schema.prisma . Added only NULLABLE/defaulted columns (non-destructive):
+                          UploadedFile: jobType("clip"|"audio"), audioMode,
+                            bedYoutubeUrl, audioGenre, audioPrompt.
+                          Clip: mediaType("video"|"audio"), wavS3Key.
+                          SAME database, SAME tables reused. Existing rows
+                          default to jobType "clip" automatically.
+- src/inngest/functions.ts
+                          New processAudioFn on event "process-audio-events".
+                          Reuses the existing downloader submit/poll helper
+                          (postCloudDownloader) for BOTH mashup tracks, the
+                          credit ledger, and the notification emails. New
+                          postAudioMixer submit/poll helper for the mixer.
+- src/app/api/inngest/route.ts ......... Registered processAudioFn.
+- src/actions/audio.ts . Server actions createMashup + createGeneratedTrack
+                          (same auth + usage-limit gates as clips).
+- src/lib/credits.ts ... creditsForAudio (generate = 1, mashup = 3 credits).
+- src/env.js ........... Added PROCESS_AUDIO_ENDPOINT (optional).
+- src/app/dashboard/audio/page.tsx ..... New Audio Studio page.
+- src/components/dashboard/audio-studio-client.tsx
+                          Tabbed UI: "Mashup two songs" (two YouTube URLs) and
+                          "Generate music" (prompt + genre dropdown).
+- src/components/dashboard/shell.tsx ... Added "Audio Studio" nav item.
+
+VERIFIED: tsc --noEmit clean, ESLint clean, Python compiles, 11 CPU tests pass.
+
+--------------------------------------------------------------------------------
+4) WHAT YOU STILL NEED TO DO  (3 steps — no installs on your machine)
+--------------------------------------------------------------------------------
+1. Deploy the mixer:   ./clipcast-backend/apps/mixer/deploy.sh
+                        (copy the process_audio URL it prints)
+2. Add to .env:        PROCESS_AUDIO_ENDPOINT=<that URL>
+3. Push the schema:    cd clipcast-frontend && npm run db:push
+Then restart and open Dashboard -> Audio Studio.
+
+--------------------------------------------------------------------------------
+5) HONEST CAVEATS
+--------------------------------------------------------------------------------
+- The GPU pipeline + DB migration CANNOT be tested from here (no GPU/Modal/DB) —
+  same reason your docs say local dev never runs processing. Steps 1-3 above are
+  the real integration test; treat the first mashup as a smoke test.
+- generate uses MusicGen (weights are non-commercial). Swap _generate to
+  ACE-Step (Apache-2.0) for a commercial-safe path — one function change.
+- Graceful degradation built in: if Gemini or the Audiobox rater can't load,
+  the mashup still renders (deterministic energy arrangement, single take).
+- UI polish TODO: clips-grid.tsx still renders audio outputs as video (no audio
+  player yet) — left untouched to avoid risk to the existing clips view.
+
+--------------------------------------------------------------------------------
+6) QUALITY UPGRADES ALREADY DOCUMENTED FOR LATER (not blocking)
+--------------------------------------------------------------------------------
+madmom downbeat grid, Essentia key detection, allin1 labelled sections,
+bass-swap EQ between two beds, Matchering reference master, ACE-Step/YuE swap.
+
+================================================================================
+7) ROADMAP: VERY ADVANCED AUDIO (optimize + mix ONE OR MORE tracks)
+================================================================================
+This is the "what to do next" list to go from a good 2-song mashup to a
+studio-grade engine that optimizes audio and mixes N tracks. Ordered by impact.
+Each item = WHAT it does, the FREE/OPEN tool, and WHERE it plugs in.
+
+--- A. TIGHTEN THE BEAT MATCH (biggest audible win) ---------------------------
+[ ] A1. True downbeat grid, not first-beat.
+        Tool: madmom (DBNDownBeatTrackingProcessor) or BeatNet.
+        Where: audio_engine.detect_bpm_and_beats -> return downbeats; align on
+        bar-ones. Fixes the "in tempo but slightly off" feel.
+[ ] A2. Beat-synchronous stretch (warp to the grid), not one global ratio.
+        Tool: pyrubberband per-beat, or rubberband --time-map.
+        Where: mashup step 4 — stretch each bar to match, so tempo drift inside
+        a song is corrected too.
+[ ] A3. Better key detection for harmonic mixing.
+        Tool: Essentia KeyExtractor (replaces the librosa Krumhansl profile).
+        Where: audio_engine.detect_key.
+
+--- B. STUDIO-GRADE MIX / MASTER (make it sound "released") -------------------
+[ ] B1. Bass-swap EQ + multiband ducking (not just broadband duck).
+        Tool: pedalboard (Spotify, VST-quality EQ/compressor/reverb) or scipy.
+        Where: audio_engine.render_mashup — only one low-end at a time; duck the
+        bed's mids under the vocal, keep its bass.
+[ ] B2. Reference mastering to a pro track.
+        Tool: Matchering 2.0 (open) — matches EQ + loudness to a reference song.
+        Where: after the rating loop, before encode.
+[ ] B3. De-ess / clean the extracted vocal (Demucs bleed).
+        Tool: pedalboard de-esser + noisereduce.
+        Where: after Demucs vocal stem, before mixing.
+[ ] B4. True-peak limiting (no inter-sample clipping on phones).
+        Tool: pyloudnorm + a simple look-ahead limiter, or ffmpeg alimiter.
+        Where: audio_engine.normalize_loudness final stage.
+
+--- C. SMARTER AI ARRANGEMENT ------------------------------------------------
+[ ] C1. Labelled sections (intro/verse/chorus), not energy clusters.
+        Tool: allin1 (All-In-One Music Structure Analyzer).
+        Where: audio_engine.detect_sections -> feed real labels to Gemini so it
+        drops the vocal chorus on the instrumental chorus exactly.
+[ ] C2. Multi-section arrangement (verse over break, chorus over drop, etc.),
+        with crossfades between placements — not one single vocal placement.
+        Where: _arrange returns a LIST of {vocal_section, bed_section, action};
+        render loops it using audio_engine.crossfade.
+[ ] C3. Lyric/vocal-activity gating so vocals never sit on the bed's own vocals.
+        Tool: Silero-VAD or the vocal stem's energy envelope.
+
+--- D. MIX ONE OR MORE TRACKS (N-track engine) -------------------------------
+[ ] D1. Generalize the request from 2 fixed keys to a LIST of sources:
+        ProcessAudioRequest.sources = [{s3_key, role}], role in
+        {vocal, bed, extra}. Downloader already handles any count.
+        Where: main.py _mashup -> loop over sources; frontend: an "add another
+        song" button (dynamic URL list) instead of two fixed fields.
+[ ] D2. Auto role-detection: run Demucs on each, measure vocal vs. instrumental
+        energy, and auto-pick who is the vocal and who is the bed.
+[ ] D3. Common-grid warping: pick ONE target BPM + key for the whole set, warp
+        every track to it (A1/A2), then layer/arrange all of them.
+[ ] D4. N-track auto-gain / headroom management so 3-4 layers don't clip:
+        loudness-match each stem, then sum with per-stem ducking priority
+        (vocal > lead > pads).
+[ ] D5. Stem mixer UI: per-track volume/mute/solo + which section each plays,
+        so the user can nudge the AI's choices.
+
+--- E. OPTIMIZE COST / SPEED / QUALITY KNOBS ---------------------------------
+[ ] E1. Warm Demucs in-memory (get_model at @modal.enter) instead of the CLI
+        subprocess, so N tracks don't each reload the model.
+[ ] E2. Quality tiers: "fast" (htdemucs, 1 take) vs "best" (htdemucs_ft, 3-take
+        rating loop + Matchering) — bill accordingly.
+[ ] E3. Expand the rating loop to optimize more than PQ (also Content Enjoyment)
+        and try a couple of arrangement candidates, not just gain back-off.
+[ ] E4. Swap generate model to ACE-Step (Apache-2.0, commercial-safe) or YuE
+        (full songs WITH sung vocals, Hindi/English) — see docs/14.
+
+--- F. PRODUCT / LEGAL ------------------------------------------------------
+[ ] F1. Copyright notice + private-only output policy for YouTube-sourced audio
+        (product decision — flag before public launch).
+[ ] F2. Audio player in the Clips grid (clips-grid.tsx) for mediaType "audio"
+        (the one UI item intentionally left for you to approve).
+
+Full technical rationale for A-C already written in docs/15 and docs/16.
+================================================================================
+
+8) UPDATE: ADVANCED AI MIXER UPGRADE ADDED AFTER THIS SUMMARY
+================================================================================
+Built now:
+- Audio Studio UI now accepts one or more sources, up to 6 total.
+- Each source can be a YouTube link OR a local audio upload:
+  MP3, WAV, M4A, AAC, FLAC, OGG.
+- User can leave role as Auto, or force Vocal / Bed / Extra.
+- New signed-upload action sends audio files directly to S3 before the job starts.
+- UploadedFile now stores audioSources JSON so the full source list is preserved.
+- Inngest now normalizes all sources:
+  * YouTube sources are downloaded through the existing downloader.
+  * Uploaded audio sources are passed directly to the mixer by S3 key.
+- Mixer now accepts sources=[...] while still supporting old vocal_s3_key/bed_s3_key.
+- Mixer runs Demucs on every source, scores vocal vs instrumental energy, and
+  auto-picks the strongest vocal + strongest bed when roles are Auto.
+- One-source mode works as a stem remix: vocals and instrumental are split from
+  the same source, then re-arranged/mastered.
+- Extra sources are tempo/key matched and layered quietly as extra beds.
+- Mixer adds a deterministic genre hint to the processing summary.
+- Compose mode now uses Gemini as a producer prompt-writer before MusicGen, so
+  short ideas become richer arrangement prompts.
+- Mashup credit pricing still starts at 3 credits for 1-2 sources, then adds
+  1 credit per extra source.
+- Beat originality mode added:
+  auto / clean / subtle / transformed / max. Default is auto. The mixer now
+  strips some original low-end, adds a new kick/hat pulse on the detected beat
+  grid, and adds rhythmic pumping before the final vocal arrangement/master.
+  This makes the bed feel re-produced instead of a direct copy.
+- Genre-first mix planning added:
+  Before joining stems, the mixer now profiles every source for BPM, key,
+  energy, spectral brightness, rhythm/onset strength, vocal/instrumental
+  balance, and a deterministic genre label. It then chooses the target
+  production lane and target BPM before rendering, e.g. lofi remix, ambient
+  cinematic remix, hip-hop remix, house remix, Bollywood hip-hop fusion,
+  Bollywood house fusion, or pop fusion remix.
+- The processing summary now reports source genres, target style, target BPM,
+  final genre hint, vocal tempo shift, bed tempo shift, key shift, arrangement
+  brain, and Audiobox score.
+- Important: this reduces direct-copy similarity, but it is NOT a legal
+  guarantee. If a user inputs copyrighted vocals, melodies, or recognizable
+  recordings, rights can still apply. Product should still label YouTube-sourced
+  mixes as private/remix output unless rights are cleared.
+- Inngest audio jobs now delete temporary S3 source files after processing
+  succeeds or fails. Final master.mp3/master.wav stay in S3; temp YouTube/audio
+  sources do not.
+- Deployed Modal mixer endpoint:
+  https://littlemovie00--clipcast-mixer-process-audio.modal.run
+- .env now has PROCESS_AUDIO_ENDPOINT set to that URL.
+- Prisma db push completed after adding audioSources JSON.
+
+Verified locally:
+- Frontend typecheck passed: cd clipcast-frontend && npm run typecheck
+- Frontend ESLint passed: cd clipcast-frontend && npm run lint
+- Prisma schema validation passed: cd clipcast-frontend && npx prisma validate
+- Backend Python syntax passed:
+  cd clipcast-backend && python -m py_compile apps/mixer/main.py apps/mixer/audio_engine.py
+
+Not run locally:
+- Full GPU model execution locally, by design. Local machine only ran CPU smoke
+  tests. Modal ran the actual downloader + mixer path.
+
+End-to-end deployed smoke test:
+- Script: audio-tests/run_modal_audio_e2e.py
+- The script now accepts custom URLs:
+  python audio-tests/run_modal_audio_e2e.py \
+    --vocal-url "<rights-cleared vocal YouTube URL>" \
+    --bed-url "<rights-cleared bed YouTube URL>" \
+    --vocal-label "Dark Side" \
+    --bed-label "Aaja Sanam" \
+    --transform-strength auto
+- Do not use copyrighted original songs unless you have the rights/permission.
+  The code can process any source technically, but the product should not run
+  or publish copyrighted original song remixes without rights clearance.
+- Successful local output folder:
+  audio-tests/e2e-youtube-mix-20260712-123551-53950b1b/
+- Files saved there:
+  inputs.json, events.log, mixer-result.json, audio-analysis.json,
+  master.mp3, master.wav, S3 poll logs, s3-cleanup.json.
+- Sources used:
+  No Copyright vocal YouTube source + No Copyright instrumental/action source.
+- Processing summary:
+  Demucs htdemucs_ft, 2 sources, auto roles, genre hint house, beat transform
+  max, tempo 148->120 BPM, key 10B->5A (+1 semitone), Gemini arrangement,
+  Audiobox PQ 6.9/10 after 3 takes.
+- Output:
+  stereo 44.1 kHz, 263.37 sec, MP3 256 kbps, WAV master, peak ~0.98,
+  integrated loudness about -18 LUFS.
+- Temporary S3 source files from the test were deleted. Final output remains in
+  S3 and is also downloaded locally for listening.
+================================================================================
+
+Latest requested two-link test:
+- Inputs:
+  https://www.youtube.com/watch?v=M-P4QBt-FWw&vl=en
+  https://www.youtube.com/watch?v=arOaGZ839fs
+- Output folder:
+  audio-tests/e2e-youtube-mix-20260712-125702-f8b1f641/
+- Output files:
+  master.mp3, master.wav, mixer-result.json, audio-analysis.json, events.log,
+  S3 poll logs, s3-cleanup.json.
+- Mixer result:
+  Demucs htdemucs_ft, vocal=Dark Side, bed=Aaja Sanam, source genres both
+  Bollywood/pop, target style Bollywood hip-hop fusion at 96 BPM, final genre
+  hint lofi, 7 lyric phrases used privately for placement, beat transform
+  transformed, vocal tempo 85->96 BPM, bed tempo 112->96 BPM, key 9A->9A
+  compatible, Gemini arrangement, Audiobox PQ 6.5/10 after 3 takes.
+- Output analysis:
+  stereo 44.1 kHz, 306.91 sec, MP3 256 kbps, WAV master, peak ~0.98,
+  integrated loudness about -14.49 LUFS.
+- Temporary S3 source files were deleted after the run. Final S3 master output
+  remains under audio-tests/20260712-125702-f8b1f641/output/.
+================================================================================
+
+Latest reference-inspired short remix test:
+- Reference analyzed, not copied:
+  https://youtu.be/pQGBucJgY88?si=2DpSr-D6oKFoquas
+- Reference takeaway:
+  short hook-focused edit, about 110 BPM, strong beat/drop energy, guitar/lead
+  bed texture supporting the vocal, not both full songs layered end-to-end.
+- Inputs:
+  https://www.youtube.com/watch?v=M-P4QBt-FWw&vl=en
+  https://www.youtube.com/watch?v=arOaGZ839fs
+- Output folder:
+  audio-tests/e2e-youtube-mix-20260712-132028-8d53d7b8/
+- Output files:
+  master.mp3, master.wav, mixer-result.json, audio-analysis.json, events.log,
+  S3 poll logs, s3-cleanup.json.
+- Mixer result:
+  Demucs htdemucs_ft, vocal=Dark Side, bed=Aaja Sanam, source genres both
+  Bollywood/pop, target style Bollywood hip-hop fusion at 96 BPM, final genre
+  hint lofi, 7 lyric phrases used privately for placement, beat transform
+  transformed, vocal tempo 85->96 BPM, bed tempo 112->96 BPM, key 9A->9A
+  compatible, Gemini arrangement, Audiobox PQ 6.6/10 after 3 takes.
+- Output analysis:
+  stereo 44.1 kHz, exactly 120.00 sec, MP3 256 kbps, WAV master, peak ~0.98,
+  integrated loudness -15.25 LUFS, no clipping samples.
+- Temporary S3 source files were deleted after the run. Final S3 master output
+  remains under audio-tests/20260712-132028-8d53d7b8/output/.
+================================================================================
+
+9) REDESIGN: VIRAL HOOK EDIT (short "X × ABC", best-part, tune-focused)
+================================================================================
+Why: the old mashup exported the FULL song (263s / 306s), used the whole track
+instead of the best part, and had thin effects. The mode was reworked into a
+short, viral, best-part edit.
+
+What changed (backend apps/mixer/):
+- FULL extraction: Demucs htdemucs_ft now runs 4-stem (vocals / drums / bass /
+  other), summed into one instrumental. Replaces the old --two-stems split.
+  (main.py _demucs_four_stems)
+- BEST PART: audio_engine.detect_hook() scores loudness + onset energy over
+  sliding windows and returns the catchiest window(s) — the "best part."
+- TUNE FOCUS: audio_engine.is_tune_only() drops the vocal and keeps just the
+  instrumental tune when the vocal's energy share in the hook is low (a lyric
+  that doesn't sit on the bed / a sparse section).
+- TWO-PART "X × ABC": two sources → one hook each; a single source → its two
+  best hooks. Parts are tempo + Camelot-key matched to one grid, then joined
+  with audio_engine.beat_matched_transition() (high-pass sweep + crossfade).
+- BANDLAB-STYLE FX: audio_engine.apply_fx_chain() runs a pedalboard channel
+  strip (EQ / low-shelf warmth / glue compressor / air / light reverb /
+  limiter). Falls back to a scipy high-pass + ceiling if pedalboard is missing,
+  so FX never breaks the render. requirements.txt: added pedalboard, removed the
+  now-unused faster-whisper.
+- SHORT + AI-DECIDED LENGTH: audio_engine.decide_edit_length() picks the length
+  musically from the tempo (~8-bar phrase per part) when the user leaves it on
+  Auto; any explicit request is clamped to 8-59s. sequence_parts() enforces a
+  hard MAX_VIRAL_SECONDS = 59 ceiling. No more long videos.
+- Rating loop kept but simplified: heavy work (separation, warp) runs once; the
+  loop only re-runs the cheap FX pass, trying "viral" then a cleaner "clean"
+  preset and keeping the best Audiobox-PQ take.
+- Removed dead code from the old overlay path: main._arrange,
+  main._transcribe_vocal_phrases, main._clean_json, and engine helpers
+  mix_vocal_over_bed, detect_sections, remix_cut, plan_arrangement_fallback,
+  next_mix_params (+ their tests). Added CPU tests for all new helpers.
+
+What changed (frontend):
+- Audio Studio "AI mix" tab is now "Viral hook mix (X × ABC)"; default two
+  sources are "Song A (X)" / "Song B (ABC)" on Auto roles.
+- "Viral clip length" selector defaults to "Auto (AI decides)"; manual options
+  are 15 / 20 / 30 / 45 / 59s only (no 90/120/180/full).
+- createAdvancedMix: 0 = auto length; any number clamps to 8-59s. Inngest passes
+  it straight through to the mixer (remix_duration_seconds; 0/None = auto).
+
+Verified locally:
+- Backend compiles: python -m py_compile apps/mixer/main.py audio_engine.py
+- 17 CPU smoke tests pass (apps/mixer/test_audio_engine.py) incl. detect_hook,
+  is_tune_only, apply_fx_chain (scipy fallback exercised), beat_matched_
+  transition, sequence_parts cap, decide_edit_length.
+- Frontend: npm run typecheck + npm run lint both clean.
+
+Deployed + GPU smoke test PASSED (2026-07-13):
+- Redeployed mixer (pedalboard-0.9.24 installed in image); endpoint unchanged:
+  https://littlemovie00--clipcast-mixer-process-audio.modal.run
+- Two-song test (auto length):
+  https://youtu.be/g0eO74UmRBs  ×  https://youtu.be/bKZTnnFU9HA
+- Result: Viral hook edit · Demucs htdemucs_ft 4-stem (2 sources) · parts
+  Song A[251-271s] × Song B[197-217s] · both bollywood/pop → bollywood hip-hop
+  fusion 96 BPM · beat transform transformed · FX viral · length 33.8s (auto) ·
+  Audiobox PQ 7.8/10 (1 take).
+- Objective checks on master.wav: 33.8s stereo 44.1kHz, peak 0.63, 0 clipped
+  samples, -14.00 LUFS (exact social target), clear RMS dip at the midpoint =
+  the transition between the two parts.
+- Output: audio-tests/e2e-youtube-mix-20260713-093012-0136ca44/master.{mp3,wav}
+- Note: real released songs → keep private (dev smoke test), same as the code's
+  own copyright caveats; not for publishing without rights.
+================================================================================
+
+10) GENRE COMPOSER + MULTIPLE CLIPS + REFERENCE MASTERING (open-source tools)
+================================================================================
+Driven by: "add beats + instruments like a real composer per genre", "handle
+songs with/without lyrics", "generate multiple clips not just one", and "use
+existing open-source software instead of building from scratch."
+
+- Genre-aware composer (audio_engine.reproduce_bed + compose_genre_layer):
+  detects the target style, then synthesizes and lays a matching kit on the beat
+  grid — tabla+dholak for Bollywood, 808+hat-rolls for trap, four-on-the-floor
+  for house, backbeat for pop/rock, mellow for lofi, pads for ambient — plus a
+  sub-bass in the song's key and a triad instrument stab. Replaces the old
+  generic kick/hat transform_bed_for_originality. Deterministic + CPU-tested.
+- Lyric AND instrumental sources: is_tune_only + a has_vocals flag mean a source
+  with no vocals becomes a tune-only part automatically; a lyric source keeps its
+  vocal over the composed bed.
+- Multiple clips per job (not one): the mixer now returns clips=[Remix, Flip,
+  Chill]. Heavy work (Demucs, Rubber Band warp) runs once; each variation only
+  re-runs the cheap composer + overlay + FX + sequence. Inngest create-audio-
+  clips creates one Clip row per variation (db.clip.createMany); title carries
+  the variation name. Credits unchanged (one job = 3 clips).
+- Reference mastering with Matchering (github.com/sergree/matchering): the final
+  master is EQ/RMS/peak/stereo-width matched to the source song's OWN original
+  recording (already pro-mastered), so the mix sounds "released."
+  audio_engine.reference_master() with a pyloudnorm fallback if it can't run.
+  requirements.txt: added matchering, pedalboard already present.
+- Deployed + tested (2026-07-13) on the two songs g0eO74UmRBs × bKZTnnFU9HA:
+  3 clips, 33.8s each (auto length), hiphop composer kit (bollywood hip-hop
+  fusion, 96 BPM, key -1st), master=matchering on all three, 0 clipping,
+  ~-14.4 to -14.8 LUFS, Audiobox PQ 7.7-7.8. Variations verified distinct
+  (pairwise mean|diff| 0.04-0.13).
+
+NEXT (researched, not yet built): swap the synthesized composer kit for a real
+open-source music model — ACE-Step 1.5 (github.com/ace-step/ACE-Step-1.5,
+Apache-2.0, <4GB VRAM, <10s/song on GPU) to GENERATE a genre/BPM/key-matched
+instrumental the vocal sits on. Bigger + GPU-heavier; vocal-over-generated-beat
+alignment needs a listen-and-tune pass, so it's gated on a go-ahead.
+================================================================================

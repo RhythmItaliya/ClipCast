@@ -26,6 +26,26 @@ billing & credits (07), admin panel (08), deployment (09). Each ends with a
 - [13-clip-modes-and-ai.md](13-clip-modes-and-ai.md) — Gemini prompts per
   mode, the All fan-out + dedupe, the open-ended Any mode with AI-invented
   category tags, HF fallback, daily auto-clip cron.
+- [14-audio-studio-mode.md](14-audio-studio-mode.md) — **plan only**: AI music
+  generation + YouTube×YouTube beat-matched mashups (Demucs stems, tempo/key
+  matching, Camelot harmonic mixing, Gemini arrangement), the open-source
+  stack, and how it slots into the existing Modal/Inngest architecture.
+- [15-mashup-mixing-mechanics.md](15-mashup-mixing-mechanics.md) —
+  plain-language: *how we actually join two songs* — stem swapping,
+  beat/grid/phrase alignment, harmonic (Camelot) key matching, transitions
+  (crossfade, bass swap), making a new beat, and the pro-vs-amateur
+  guardrails. No music knowledge needed.
+- [16-ai-arrangement-and-audio-rating.md](16-ai-arrangement-and-audio-rating.md)
+  — the AI-driven half (**built** in `apps/mixer`): Gemini decides the DJ
+  arrangement (which vocal part lands where, ducking, intro build), then an
+  Audiobox-Aesthetics rating loop re-renders and keeps the best-scoring take.
+  One warm Modal container; deterministic DSP is unit-tested.
+- [17-multi-agent-production-crew.md](17-multi-agent-production-crew.md) —
+  **plan only**: turn both pipelines into a film-production-style *crew of AI
+  agents* (director, composer, lyricist, colorist, critic…) that understand the
+  material emotionally, hand work to each other, revise in a bounded Modal loop,
+  and leave a visible decision trail (the "Production Room" observability view).
+  Everything dynamic — no hardcoded colors/moods — with mock-LLM CPU tests.
 
 ## Diagrams
 - [diagrams/](diagrams/README.md) — the formal set (use case, architecture,

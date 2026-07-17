@@ -92,3 +92,5 @@ Deep dives (read after the tour above):
 11. [11-notifications-and-email.md](11-notifications-and-email.md): SMTP/Resend transport, queued sends via Inngest, email OTP sign-in
 12. [12-captions-and-branding.md](12-captions-and-branding.md): word-level caption pills, font-metric math, per-user color & watermark
 13. [13-clip-modes-and-ai.md](13-clip-modes-and-ai.md): mode prompts, the All fan-out, open-ended Any mode, daily auto-clip cron
+14. [14-audio-studio-mode.md](14-audio-studio-mode.md): **plan only** — AI music generation + YouTube mashup mixing (stem split, beat/key matching, harmonic mixing), the open-source tool stack, end-to-end build order
+15. [15-mashup-mixing-mechanics.md](15-mashup-mixing-mechanics.md): **plan only** — the music mechanics in plain language: how two songs are joined (stem swap, beat/grid alignment, key matching, transitions, making a new beat), no music knowledge needed
