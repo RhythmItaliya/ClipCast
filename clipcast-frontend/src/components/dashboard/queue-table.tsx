@@ -60,10 +60,15 @@ export function QueueTable({
   compact = false,
   title = "Queue",
   description = "Latest processing jobs across your workspace.",
+  hideHeading = false,
 }: {
   compact?: boolean;
   title?: string;
   description?: string;
+  // On the dedicated /dashboard/queue page the shell top bar already shows the
+  // "Queue" title + description, so we hide this component's own heading there
+  // (the Refresh button still renders). The compact overview keeps its heading.
+  hideHeading?: boolean;
 }) {
   // Files and polling live in the shared queue-status query (seeded
   // server-side in dashboard/layout.tsx). This subscribes to the files
@@ -194,11 +199,17 @@ export function QueueTable({
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-semibold tracking-tight">{title}</h2>
-          <p className="text-muted-foreground text-xs">{description}</p>
-        </div>
+      <div
+        className={`flex items-center ${
+          hideHeading ? "justify-end" : "justify-between"
+        }`}
+      >
+        {!hideHeading && (
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+            <p className="text-muted-foreground text-xs">{description}</p>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           {compact && (
             <Link

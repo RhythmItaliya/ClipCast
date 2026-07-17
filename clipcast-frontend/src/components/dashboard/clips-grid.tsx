@@ -2,10 +2,13 @@
 
 import {
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Download,
   ExternalLink,
   Loader2,
+  Music,
   Play,
   Scissors,
   Trash2,
@@ -14,12 +17,13 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { deleteClip, getClipUrl } from "~/actions/clips";
 import { uploadClipToYouTube } from "~/actions/youtube";
 import { YoutubeIcon } from "~/components/brand";
 import { useConfirm } from "~/components/ui/confirm-dialog";
+import { useLazyThumbnails } from "~/hooks/use-lazy-thumbnails";
 import {
   FRIENDLY_MESSAGES,
   getFriendlyErrorMessage,
@@ -46,26 +50,74 @@ const THUMB_GRADIENTS = [
 export function ClipsGrid({
   groups,
   youtubeConnected = false,
+  page = 1,
+  pageSize = 8,
+  total = 0,
 }: {
   groups: ClipGroup[];
   youtubeConnected?: boolean;
+  page?: number;
+  pageSize?: number;
+  total?: number;
 }) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   return (
     <section className="space-y-6">
       {groups.length === 0 ? (
         <EmptyState />
       ) : (
-        <div className="space-y-4">
-          {groups.map((g) => (
-            <VideoGroupSection
-              key={g.id}
-              group={g}
-              youtubeConnected={youtubeConnected}
-            />
-          ))}
-        </div>
+        <>
+          <div className="space-y-4">
+            {groups.map((g) => (
+              <VideoGroupSection
+                key={g.id}
+                group={g}
+                youtubeConnected={youtubeConnected}
+              />
+            ))}
+          </div>
+          <Pagination page={page} totalPages={totalPages} total={total} />
+        </>
       )}
     </section>
+  );
+}
+
+function Pagination({
+  page,
+  totalPages,
+  total,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+}) {
+  const router = useRouter();
+  if (totalPages <= 1) return null;
+  const go = (p: number) => router.push(`/dashboard/clips?page=${p}`);
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-muted-foreground text-xs">
+        {total.toLocaleString()} source{total !== 1 ? "s" : ""} · page {page} of{" "}
+        {totalPages}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => go(page - 1)}
+          disabled={page <= 1}
+          className="border-border bg-surface hover:bg-surface-2 flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+        >
+          <ChevronLeft className="size-3.5" /> Prev
+        </button>
+        <button
+          onClick={() => go(page + 1)}
+          disabled={page >= totalPages}
+          className="border-border bg-surface hover:bg-surface-2 flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+        >
+          Next <ChevronRight className="size-3.5" />
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -77,16 +129,33 @@ function VideoGroupSection({
   youtubeConnected: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const { urls: thumbnails, load } = useLazyThumbnails();
+  const isAudioGroup =
+    group.clips.length > 0 &&
+    group.clips.every((c) => c.mediaType === "audio");
+
+  // Presign this group's thumbnails only the first time it's expanded.
+  const toggle = useCallback(() => {
+    setOpen((wasOpen) => {
+      if (!wasOpen) void load(group.clips.map((c) => c.id));
+      return !wasOpen;
+    });
+  }, [load, group.clips]);
+
   return (
     <div className="border-border bg-surface/40 rounded-3xl border">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         className="hover:bg-surface-2 flex w-full cursor-pointer items-center justify-between gap-4 rounded-3xl px-5 py-4 text-left transition-colors"
       >
         <div className="flex min-w-0 items-center gap-3">
           <span className="bg-brand-soft text-brand grid size-10 shrink-0 place-items-center rounded-2xl">
-            <Video className="size-5" />
+            {isAudioGroup ? (
+              <Music className="size-5" />
+            ) : (
+              <Video className="size-5" />
+            )}
           </span>
           <div className="min-w-0">
             <h3 className="truncate text-sm leading-tight font-semibold">
@@ -110,6 +179,7 @@ function VideoGroupSection({
             <ClipCard
               key={clip.id}
               clip={clip}
+              thumbnailUrl={thumbnails[clip.id] ?? clip.thumbnailUrl ?? null}
               source={group.title}
               index={i}
               youtubeConnected={youtubeConnected}
@@ -123,11 +193,13 @@ function VideoGroupSection({
 
 function ClipCard({
   clip,
+  thumbnailUrl,
   source,
   index,
   youtubeConnected,
 }: {
   clip: ClipItem;
+  thumbnailUrl: string | null;
   source: string;
   index: number;
   youtubeConnected: boolean;
@@ -150,6 +222,9 @@ function ClipCard({
   const confirm = useConfirm();
   const router = useRouter();
   const gradient = THUMB_GRADIENTS[index % THUMB_GRADIENTS.length]!;
+  // Audio Studio outputs (mashups / generated tracks) are audio-only: play them
+  // in an <audio> element and hide the video-only "Post to YouTube" action.
+  const isAudio = clip.mediaType === "audio";
 
   const handlePlay = async () => {
     if (loading) return;
@@ -263,9 +338,20 @@ function ClipCard({
   return (
     <article className="group border-border bg-background hover:border-brand/40 hover:shadow-brand/5 overflow-hidden rounded-2xl border transition-all hover:-translate-y-0.5 hover:shadow-lg">
       <div
-        className={`relative aspect-[9/12] ${clip.thumbnailUrl ? "bg-black" : `bg-gradient-to-br ${gradient}`}`}
+        className={`relative aspect-[9/12] ${
+          !isAudio && thumbnailUrl
+            ? "bg-black"
+            : `bg-gradient-to-br ${gradient}`
+        }`}
       >
-        {videoUrl ? (
+        {videoUrl && isAudio ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-4">
+            <Music className="size-12 text-white/90" />
+            <audio src={videoUrl} controls autoPlay className="w-full">
+              <track kind="captions" />
+            </audio>
+          </div>
+        ) : videoUrl ? (
           <video
             src={videoUrl}
             controls
@@ -275,18 +361,21 @@ function ClipCard({
           />
         ) : (
           <>
-            {clip.thumbnailUrl && (
+            {!isAudio && thumbnailUrl && (
               <img
-                src={clip.thumbnailUrl}
+                src={thumbnailUrl}
                 alt=""
                 className="absolute inset-0 h-full w-full object-cover"
               />
             )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/10" />
+            {isAudio && (
+              <Music className="absolute inset-0 m-auto size-12 text-white/70" />
+            )}
             <button
               onClick={handlePlay}
               className="absolute inset-0 grid place-items-center opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
-              title="Play clip"
+              title={isAudio ? "Play track" : "Play clip"}
             >
               <span className="grid size-14 place-items-center rounded-full bg-white/90 text-black shadow-lg backdrop-blur-sm transition-transform group-hover:scale-110">
                 {loading === "play" ? (
@@ -348,6 +437,7 @@ function ClipCard({
             )}
           </button>
           {youtubeConnected &&
+            !isAudio &&
             (postedVideoId ? (
               <a
                 href={`https://www.youtube.com/watch?v=${postedVideoId}`}

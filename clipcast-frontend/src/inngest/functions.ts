@@ -1,6 +1,7 @@
+import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { env } from "~/env";
 import { inngest } from "./client";
-import { creditsForDuration } from "~/lib/credits";
+import { creditsForAudio, creditsForDuration } from "~/lib/credits";
 import { db } from "~/server/db";
 import {
   clipReadyEmailHtml,
@@ -29,6 +30,34 @@ class JobProcessingError extends Error {
 
 const GENERIC_FRIENDLY_ERROR =
   "Something went wrong while processing your video. Please try again, and contact support if it keeps happening.";
+
+let s3Client: S3Client | null = null;
+
+function getS3Client() {
+  s3Client ??= new S3Client({
+    region: env.AWS_REGION,
+    credentials: {
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+    },
+  });
+  return s3Client;
+}
+
+async function deleteS3Keys(keys: string[]) {
+  const uniqueKeys = [...new Set(keys.filter(Boolean))];
+  await Promise.allSettled(
+    uniqueKeys.map((key) =>
+      getS3Client().send(
+        new DeleteObjectCommand({
+          Bucket: env.S3_BUCKET_NAME,
+          Key: key,
+        }),
+      ),
+    ),
+  );
+  return { deleted: uniqueKeys.length };
+}
 
 // ── Video Processing ────────────────────────────────────────────────────────
 export const processVideoFn = inngest.createFunction(
@@ -598,6 +627,424 @@ export const processVideoFn = inngest.createFunction(
   },
 );
 
+// ── Audio Studio Processing ─────────────────────────────────────────────────
+// The mashup + generate pipeline. Reuses the exact same building blocks as the
+// clip pipeline — the CPU downloader (postCloudDownloader submit/poll), the
+// credit ledger, the notification emails — and writes its output into the SAME
+// Clip table (mediaType "audio"). It never touches the clip pipeline's code.
+export const processAudioFn = inngest.createFunction(
+  {
+    id: "process-audio",
+    retries: 1,
+    concurrency: { limit: 1, key: "event.data.userId" },
+    cancelOn: [{ event: "cancel-job-events", match: "data.uploadedFileId" }],
+    onFailure: async ({ event }) => {
+      const originalEvent = event.data.event as {
+        data: { uploadedFileId?: string };
+      };
+      const uploadedFileId = originalEvent?.data?.uploadedFileId;
+      if (uploadedFileId) {
+        await db.uploadedFile.update({
+          where: { id: uploadedFileId },
+          data: { status: "failed" },
+        });
+      }
+    },
+  },
+  { event: "process-audio-events" },
+  async ({ event, step }) => {
+    const {
+      uploadedFileId,
+      userId,
+      audioMode,
+      vocalUrl,
+      bedUrl,
+      sources,
+      sourceCount,
+      transformStrength,
+      remixDurationSeconds,
+      targetGenre,
+      genre,
+      prompt,
+    } = event.data as {
+      uploadedFileId: string;
+      userId: string;
+      audioMode: "generate" | "mashup";
+      vocalUrl?: string;
+      bedUrl?: string;
+      sources?: AudioEventSource[];
+      sourceCount?: number;
+      transformStrength?: "auto" | "clean" | "subtle" | "transformed" | "max";
+      remixDurationSeconds?: number;
+      targetGenre?: string;
+      genre?: string;
+      prompt?: string;
+    };
+
+    const AUDIO_GENERIC_ERROR =
+      "Something went wrong while creating your audio. Please try again, and " +
+      "contact support if it keeps happening.";
+    const DOWNLOAD_FAILED_FRIENDLY =
+      "We couldn't download one of these YouTube videos right now. This is " +
+      "usually temporary — try again in a few minutes.";
+
+    // Reuses the downloader's submit/poll contract (postCloudDownloader),
+    // parametrized by a unique step prefix so both mashup tracks can run
+    // through it without step-id collisions. Returns the measured duration.
+    async function downloadToS3(
+      youtubeUrl: string,
+      s3Key: string,
+      prefix: string,
+    ): Promise<number> {
+      // Audio jobs only need the audio track — bestaudio is far faster/smaller
+      // than the full up-to-4K video download the clip pipeline uses.
+      const submitted = await step.run(`${prefix}-submit`, () =>
+        postCloudDownloader({
+          youtube_url: youtubeUrl,
+          s3_key: s3Key,
+          audio_only: true,
+        }),
+      );
+      const callId = submitted.data.call_id;
+      if (submitted.httpStatus !== 202 || !callId) {
+        throw new JobProcessingError(
+          DOWNLOAD_FAILED_FRIENDLY,
+          `Could not submit download (HTTP ${submitted.httpStatus}): ${submitted.body.slice(0, 600)}`,
+        );
+      }
+      await step.sleep(`${prefix}-wait-start`, "30s");
+      for (let attempt = 1; attempt <= 90; attempt++) {
+        const poll = await step.run(`${prefix}-poll-${attempt}`, () =>
+          postCloudDownloader({ call_id: callId }),
+        );
+        if (poll.httpStatus === 202) {
+          const delay = Math.min(15 + (attempt - 1) * 5, 60);
+          await step.sleep(`${prefix}-sleep-${attempt}`, `${delay}s`);
+          continue;
+        }
+        if (poll.httpStatus < 200 || poll.httpStatus >= 300) {
+          throw new JobProcessingError(
+            DOWNLOAD_FAILED_FRIENDLY,
+            `Download failed (HTTP ${poll.httpStatus}): ${poll.body.slice(0, 600)}`,
+          );
+        }
+        return poll.data.duration && poll.data.duration > 0
+          ? poll.data.duration
+          : 0;
+      }
+      throw new JobProcessingError(
+        "This is taking longer than expected. One of the videos may be too " +
+          "long, or YouTube downloads are temporarily restricted. Try again later.",
+        "Audio download did not finish within 90 poll attempts (~85 min).",
+      );
+    }
+
+    // Submit/poll the mixer, same shape as the downloader so the wait never
+    // holds an HTTP request open.
+    async function runMixer(
+      payload: Record<string, unknown>,
+      prefix: string,
+    ): Promise<AudioMixerResult> {
+      if (!env.PROCESS_AUDIO_ENDPOINT) {
+        throw new JobProcessingError(
+          "Audio creation isn't available right now. Please try again later.",
+          "PROCESS_AUDIO_ENDPOINT is not configured. Add it to .env and restart.",
+        );
+      }
+      const submitted = await step.run(`${prefix}-submit`, () =>
+        postAudioMixer(payload),
+      );
+      const callId = submitted.data.call_id;
+      if (submitted.httpStatus !== 202 || !callId) {
+        throw new JobProcessingError(
+          AUDIO_GENERIC_ERROR,
+          `Could not submit mixer job (HTTP ${submitted.httpStatus}): ${submitted.body.slice(0, 600)}`,
+        );
+      }
+      await step.sleep(`${prefix}-wait-start`, "20s");
+      for (let attempt = 1; attempt <= 90; attempt++) {
+        const poll = await step.run(`${prefix}-poll-${attempt}`, () =>
+          postAudioMixer({ call_id: callId }),
+        );
+        if (poll.httpStatus === 202) {
+          const delay = Math.min(15 + (attempt - 1) * 5, 60);
+          await step.sleep(`${prefix}-sleep-${attempt}`, `${delay}s`);
+          continue;
+        }
+        if (poll.httpStatus < 200 || poll.httpStatus >= 300) {
+          throw new JobProcessingError(
+            AUDIO_GENERIC_ERROR,
+            `Mixer failed (HTTP ${poll.httpStatus}): ${poll.body.slice(0, 600)}`,
+          );
+        }
+        return poll.data;
+      }
+      throw new JobProcessingError(
+        "Your audio is taking longer than expected to create. Please try again later.",
+        "Mixer job did not finish within 90 poll attempts (~85 min).",
+      );
+    }
+
+    const tempAudioSourceKeys: string[] = [];
+
+    try {
+      const mixSourceCount =
+        audioMode === "mashup" ? (sourceCount ?? sources?.length ?? 2) : 0;
+      const requiredCredits = creditsForAudio(audioMode, mixSourceCount);
+      const { credits } = await step.run("check-credits-audio", async () => {
+        const file = await db.uploadedFile.findUniqueOrThrow({
+          where: { id: uploadedFileId },
+          select: { user: { select: { credits: true } } },
+        });
+        return { credits: file.user.credits };
+      });
+
+      if (credits < requiredCredits) {
+        await step.run("set-status-no-credits-audio", async () => {
+          await db.uploadedFile.update({
+            where: { id: uploadedFileId },
+            data: { status: "no credits" },
+          });
+          return { status: "no credits", requiredCredits, credits };
+        });
+        return { skipped: true, reason: "no-credits" };
+      }
+
+      await step.run("set-status-processing-audio", async () => {
+        await db.uploadedFile.update({
+          where: { id: uploadedFileId },
+          data: {
+            status: "processing",
+            errorMessage: null,
+            internalErrorDetail: null,
+          },
+        });
+        return { status: "processing" };
+      });
+
+      const outPrefix = `audio/${uploadedFileId}/`;
+      let result: AudioMixerResult;
+
+      if (audioMode === "mashup") {
+        if (sources?.length) {
+          const mixerSources: AudioMixerSource[] = [];
+          for (const [index, source] of sources.entries()) {
+            const prefix = `dl-src-${index + 1}`;
+            const label = source.label ?? `Source ${index + 1}`;
+            if (source.kind === "youtube") {
+              if (!source.url) {
+                throw new JobProcessingError(
+                  "One source is missing its YouTube link. Please check the mix and try again.",
+                  `audio source ${index + 1} missing url`,
+                );
+              }
+              const s3Key = `${outPrefix}source_${index + 1}.m4a`;
+              await downloadToS3(source.url, s3Key, prefix);
+              tempAudioSourceKeys.push(s3Key);
+              mixerSources.push({
+                s3_key: s3Key,
+                role: source.role ?? "auto",
+                label,
+              });
+            } else {
+              if (!source.s3Key) {
+                throw new JobProcessingError(
+                  "One uploaded audio source is missing. Please upload it again.",
+                  `audio source ${index + 1} missing s3Key`,
+                );
+              }
+              if (source.s3Key.startsWith(`audio-sources/${userId}/`)) {
+                tempAudioSourceKeys.push(source.s3Key);
+              }
+              mixerSources.push({
+                s3_key: source.s3Key,
+                role: source.role ?? "auto",
+                label,
+              });
+            }
+          }
+
+          result = await runMixer(
+            {
+              mode: "mashup",
+              out_prefix: outPrefix,
+              sources: mixerSources,
+              transform_strength: transformStrength ?? "auto",
+              remix_duration_seconds: remixDurationSeconds ?? 0,
+              target_genre: targetGenre ?? "auto",
+            },
+            "mix",
+          );
+        } else if (!vocalUrl || !bedUrl) {
+          throw new JobProcessingError(
+            "A mix needs at least one YouTube link or uploaded audio file. Please add a source and try again.",
+            "mashup event missing sources and legacy vocalUrl/bedUrl",
+          );
+        } else {
+          const vocalKey = `${outPrefix}vocal_src.m4a`;
+          const bedKey = `${outPrefix}bed_src.m4a`;
+          // Legacy two-link path: keep compatibility with older queued events.
+          await downloadToS3(vocalUrl, vocalKey, "dl-vocal");
+          await downloadToS3(bedUrl, bedKey, "dl-bed");
+          tempAudioSourceKeys.push(vocalKey, bedKey);
+          result = await runMixer(
+            {
+              mode: "mashup",
+              out_prefix: outPrefix,
+              vocal_s3_key: vocalKey,
+              bed_s3_key: bedKey,
+              transform_strength: "auto",
+              remix_duration_seconds: remixDurationSeconds ?? 0,
+              target_genre: targetGenre ?? "auto",
+            },
+            "mix",
+          );
+        }
+      } else {
+        result = await runMixer(
+          {
+            mode: "generate",
+            out_prefix: outPrefix,
+            prompt: prompt ?? null,
+            genre: genre ?? null,
+            duration_seconds: 20,
+          },
+          "gen",
+        );
+      }
+
+      if (!result.s3_key) {
+        throw new JobProcessingError(
+          AUDIO_GENERIC_ERROR,
+          `Mixer returned success without an s3_key: ${JSON.stringify(result).slice(0, 400)}`,
+        );
+      }
+
+      // A mashup returns several variations (Remix / Flip / Chill); generate
+      // one clip row each. Older single-result shapes fall back to one row.
+      const audioClips: AudioMixerClip[] =
+        result.clips && result.clips.length > 0
+          ? result.clips
+          : [
+              {
+                s3_key: result.s3_key,
+                wav_s3_key: result.wav_s3_key,
+                duration: result.duration,
+                title: result.title,
+                processing_summary: result.processing_summary,
+              },
+            ];
+
+      await step.run("create-audio-clips", async () => {
+        await db.clip.createMany({
+          data: audioClips.map((clip) => ({
+            s3Key: clip.s3_key,
+            wavS3Key: clip.wav_s3_key ?? null,
+            title: clip.title ?? (audioMode === "mashup" ? "Mashup" : "Track"),
+            duration: clip.duration ? Math.round(clip.duration) : null,
+            mediaType: "audio",
+            clipMode: audioMode,
+            uploadedFileId,
+            userId,
+            isPreview: false,
+          })),
+        });
+        return { created: audioClips.length };
+      });
+
+      await step.run("deduct-credits-audio", async () => {
+        const user = await db.user.findUnique({
+          where: { id: userId },
+          select: { credits: true },
+        });
+        const currentCredits = user?.credits ?? 0;
+        const actualDeduction = Math.min(
+          requiredCredits,
+          Math.max(0, currentCredits),
+        );
+        await db.user.update({
+          where: { id: userId },
+          data: { credits: { decrement: actualDeduction } },
+        });
+        const creditsRemaining = currentCredits - actualDeduction;
+        if (actualDeduction > 0) {
+          await db.creditTransaction.create({
+            data: {
+              userId,
+              type: "job_charge",
+              amount: -actualDeduction,
+              balanceAfter: creditsRemaining,
+              uploadedFileId,
+              description: `Audio job (${audioMode})`,
+            },
+          });
+        }
+        return { actualDeduction, creditsRemaining };
+      });
+
+      await step.run("cleanup-audio-temp-sources", async () => {
+        return deleteS3Keys(tempAudioSourceKeys);
+      });
+
+      await step.run("set-status-processed-audio", async () => {
+        await db.uploadedFile.update({
+          where: { id: uploadedFileId },
+          data: {
+            status: "processed",
+            duration: result.duration ? Math.round(result.duration) : null,
+            processingSummary: result.processing_summary ?? null,
+            errorMessage: null,
+            internalErrorDetail: null,
+          },
+        });
+        return { status: "processed" };
+      });
+
+      await step.run("notify-audio-ready", async () => {
+        const user = await db.user.findUnique({
+          where: { id: userId },
+          select: { email: true, notifyClipReady: true },
+        });
+        if (!user?.notifyClipReady) return { sent: false, reason: "opted-out" };
+        await queueEmail({
+          to: user.email,
+          subject: "Your audio is ready",
+          html: clipReadyEmailHtml({
+            sourceTitle: audioMode === "mashup" ? "your mashup" : "your track",
+            clipCount: audioClips.length,
+          }),
+        });
+        return { sent: true };
+      });
+
+      return { success: true };
+    } catch (error: unknown) {
+      const technicalDetail =
+        error instanceof Error ? error.message : String(error);
+      const friendlyMessage =
+        error instanceof JobProcessingError
+          ? error.friendlyMessage
+          : AUDIO_GENERIC_ERROR;
+      console.error(
+        `[inngest] processAudio failed for ${uploadedFileId}:`,
+        technicalDetail,
+      );
+      await db.uploadedFile.update({
+        where: { id: uploadedFileId },
+        data: {
+          status: "failed",
+          errorMessage: friendlyMessage,
+          internalErrorDetail: technicalDetail,
+        },
+      });
+      await step.run("cleanup-audio-temp-sources-after-failure", async () => {
+        return deleteS3Keys(tempAudioSourceKeys);
+      });
+      throw error;
+    }
+  },
+);
+
 // ── Daily Clip Scheduler (CRON) ─────────────────────────────────────────────
 // Runs every day at 09:00 UTC.
 // For each user with a connected YouTube channel, fetches their latest video,
@@ -865,10 +1312,25 @@ type CloudDownloaderResponse = {
   source_bytes?: number;
 };
 
+type AudioEventSource = {
+  kind: "youtube" | "s3";
+  url?: string;
+  s3Key?: string;
+  role?: "auto" | "vocal" | "bed" | "extra";
+  label?: string;
+};
+
+type AudioMixerSource = {
+  s3_key: string;
+  role?: "auto" | "vocal" | "bed" | "extra";
+  label?: string;
+};
+
 async function postCloudDownloader(payload: {
   youtube_url?: string;
   s3_key?: string;
   call_id?: string;
+  audio_only?: boolean;
 }): Promise<{
   httpStatus: number;
   data: CloudDownloaderResponse;
@@ -890,6 +1352,62 @@ async function postCloudDownloader(payload: {
   let data: CloudDownloaderResponse = {};
   try {
     data = JSON.parse(body) as CloudDownloaderResponse;
+  } catch {
+    // Preserve the raw body for the error reported to the job record.
+  }
+  return { httpStatus: response.status, data, body };
+}
+
+// ── Audio mixer transport ───────────────────────────────────────────────────
+type AudioMixerClip = {
+  s3_key: string;
+  wav_s3_key?: string;
+  duration?: number;
+  title?: string;
+  processing_summary?: string;
+};
+
+type AudioMixerResult = {
+  success?: boolean;
+  duration?: number;
+  s3_key?: string;
+  wav_s3_key?: string;
+  title?: string;
+  processing_summary?: string;
+  // Mashups return several variations; older single-result callers still get
+  // the top-level s3_key (= the first clip).
+  clips?: AudioMixerClip[];
+};
+
+type AudioMixerResponse = AudioMixerResult & {
+  status?: string;
+  call_id?: string;
+  detail?: string;
+};
+
+/** Submit/poll the mixer endpoint (PROCESS_AUDIO_ENDPOINT), same contract as
+ * postCloudDownloader: a submit call returns 202 + call_id, subsequent polls
+ * (with call_id) return 202 while pending or 200 with the result. */
+async function postAudioMixer(payload: Record<string, unknown>): Promise<{
+  httpStatus: number;
+  data: AudioMixerResponse;
+  body: string;
+}> {
+  if (!env.PROCESS_AUDIO_ENDPOINT) {
+    throw new Error("PROCESS_AUDIO_ENDPOINT is not configured");
+  }
+  const response = await fetch(env.PROCESS_AUDIO_ENDPOINT, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${env.PROCESS_VIDEO_ENDPOINT_AUTH}`,
+    },
+  });
+  const body = await response.text();
+  let data: AudioMixerResponse = {};
+  try {
+    data = JSON.parse(body) as AudioMixerResponse;
   } catch {
     // Preserve the raw body for the error reported to the job record.
   }

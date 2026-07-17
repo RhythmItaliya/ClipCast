@@ -35,7 +35,7 @@ export function SettingsClient({
   clipAppearance: ClipAppearance;
 }) {
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="w-full space-y-6">
       <ProfileSection initialName={name} email={email} />
       <ClipAppearanceSection initial={clipAppearance} />
       <NotificationsSection initial={notifications} />

@@ -267,7 +267,7 @@ export function YouTubeChannelClient({
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="w-full space-y-6">
       {/* Channel connection */}
       <section className="border-border from-brand/15 overflow-hidden rounded-3xl border bg-gradient-to-br via-transparent to-transparent p-7">
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 sm:flex sm:justify-between">

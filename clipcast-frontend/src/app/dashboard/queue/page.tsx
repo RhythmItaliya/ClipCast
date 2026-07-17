@@ -15,5 +15,7 @@ export default async function QueuePage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
-  return <QueueTable />;
+  // The shell top bar already renders the "Queue" title + description, so hide
+  // the table's own heading here to avoid showing it twice.
+  return <QueueTable hideHeading />;
 }

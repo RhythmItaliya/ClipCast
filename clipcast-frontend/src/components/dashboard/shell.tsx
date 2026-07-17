@@ -59,6 +59,12 @@ const nav = [
     description: "Processing jobs across your workspace.",
   },
   {
+    title: "Audio Studio",
+    to: "/dashboard/audio",
+    icon: Sparkles,
+    description: "Generate music or mash up two songs into a beat-matched mix.",
+  },
+  {
     title: "YouTube",
     to: "/dashboard/youtube",
     icon: YoutubeIcon,

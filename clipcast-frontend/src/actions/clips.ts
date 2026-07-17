@@ -10,7 +10,7 @@ import { revalidatePath } from "next/cache";
 import { env } from "~/env";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
-import type { ActionResult } from "~/types";
+import type { ActionResult, ClipGroup } from "~/types";
 
 function s3Client() {
   return new S3Client({
@@ -106,6 +106,100 @@ export async function getClipThumbnailUrls(
   return Object.fromEntries(entries.filter((e): e is readonly [string, string] => e !== null));
 }
 
+
+/** Human "Title Case" clip name derived from its S3 key, for clips rendered
+ * before AI titles existed. */
+function clipTitle(s3Key: string, clipMode: string): string {
+  const base = s3Key.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "Clip";
+  const pretty = base.replace(/[_-]+/g, " ").trim();
+  return pretty.length > 1
+    ? pretty.charAt(0).toUpperCase() + pretty.slice(1)
+    : `${clipMode} clip`;
+}
+
+function relativeTime(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const mins = Math.floor(diffMs / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+// Source groups per Clips page. Local (not exported) because a "use server"
+// module may only export async functions; the grid falls back to the same 8.
+const CLIP_GROUPS_PAGE_SIZE = 8;
+
+/**
+ * One page of clip groups (source videos), newest source first. Paginated by
+ * source so opening the Clips page never loads every clip at once, and NO
+ * thumbnails are presigned here — the grid fetches a group's thumbnails lazily
+ * via `getClipThumbnailUrls` only when that group is expanded.
+ */
+export async function getClipGroups(
+  page = 1,
+  pageSize = CLIP_GROUPS_PAGE_SIZE,
+): Promise<{ groups: ClipGroup[]; total: number; pageSize: number }> {
+  const session = await auth();
+  if (!session?.user?.id) return { groups: [], total: 0, pageSize };
+
+  // Clips cascade-delete with their source, so every clip has a source here —
+  // grouping by UploadedFile is exhaustive.
+  const where = { userId: session.user.id, clips: { some: {} } };
+  const [files, total] = await Promise.all([
+    db.uploadedFile.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (Math.max(1, page) - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        displayName: true,
+        clips: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            s3Key: true,
+            clipMode: true,
+            isPreview: true,
+            title: true,
+            duration: true,
+            createdAt: true,
+            youtubeVideoId: true,
+            mediaType: true,
+          },
+        },
+      },
+    }),
+    db.uploadedFile.count({ where }),
+  ]);
+
+  const groups: ClipGroup[] = files.map((file) => ({
+    id: file.id,
+    title: file.displayName ?? "Untitled source",
+    clips: file.clips.map((clip) => ({
+      id: clip.id,
+      title: clip.title ?? clipTitle(clip.s3Key, clip.clipMode),
+      clipMode: clip.clipMode,
+      isPreview: clip.isPreview,
+      duration: clip.duration,
+      // Presigned on demand when the group expands (see getClipThumbnailUrls).
+      thumbnailUrl: null,
+      createdAt: relativeTime(clip.createdAt),
+      youtubeVideoId: clip.youtubeVideoId,
+      mediaType: clip.mediaType,
+    })),
+  }));
+
+  return { groups, total, pageSize };
+}
 
 /** Delete a clip: removes the S3 object (best-effort) and the DB record. */
 export async function deleteClip(clipId: string): Promise<ActionResult> {
