@@ -191,6 +191,45 @@ MODE_CATEGORY_LABELS = {
     "highlights": "Highlights",
 }
 
+# Hard floor on clip length. The prompts ask Gemini for 30-60s clips, but it
+# occasionally returns a sliver (a few seconds) that makes a jarring micro-clip;
+# identify_moments drops anything shorter than this, the single choke point for
+# every mode.
+MIN_CLIP_SECONDS = 15.0
+
+# Auto-theme the active-word caption highlight by the clip's mood/category when
+# the user hasn't picked their own color. Keyed first on the fixed mode labels,
+# then on keywords for the AI-invented "any"-mode tags.
+CATEGORY_HIGHLIGHT_HEX = {
+    "q&a": "#38BDF8",          # sky — informative
+    "educational": "#22C55E",  # green — learning
+    "motivational": "#F59E0B", # amber — inspiring
+    "highlights": "#EF4444",   # red — hype
+}
+_MOOD_KEYWORD_HEX = [
+    (("sad", "emotional", "grief", "loss", "heartfelt", "reflect", "introspect"), "#6366F1"),
+    (("funny", "comedy", "humor", "laugh", "joke"), "#F59E0B"),
+    (("debate", "controvers", "argument", "hot take", "conflict"), "#EF4444"),
+    (("inspir", "motivat", "uplift", "hope"), "#F97316"),
+    (("story", "journey", "struggle"), "#A855F7"),
+    (("tip", "lesson", "insight", "how", "learn", "fact"), "#22C55E"),
+    (("energy", "hype", "wild", "crazy", "viral", "surpris"), "#EC4899"),
+]
+
+
+def _category_highlight_hex(category):
+    """Mood-themed caption highlight hex for a clip's category, or None (→ brand
+    default) when nothing matches."""
+    if not category:
+        return None
+    c = category.strip().lower()
+    if c in CATEGORY_HIGHLIGHT_HEX:
+        return CATEGORY_HIGHLIGHT_HEX[c]
+    for keywords, hex_color in _MOOD_KEYWORD_HEX:
+        if any(k in c for k in keywords):
+            return hex_color
+    return None
+
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.0-devel-ubuntu22.04", add_python="3.11")
     .apt_install([
@@ -563,6 +602,55 @@ def process_clip(base_dir, original_video_path, s3_key, start_time, end_time, cl
 # sentences itself before it can find the "sentence boundaries" the prompt
 # asks for. Grouping into sentences first is both far more compact and a
 # better match for what the prompt actually needs.
+def _fill_word_times(words, default_dur=0.3):
+    """Give every word a numeric (start, end) by interpolating across any run
+    WhisperX left un-timed.
+
+    WhisperX's forced alignment occasionally fails to time a stretch of words
+    (music beds, crosstalk, or drift on longer audio) — those words come back
+    with missing or NaN timestamps. The old code dropped them, so captions
+    simply vanished for that stretch (the "captions only on half the clip"
+    bug). Here we instead interpolate: an interior gap is spread linearly
+    between its known neighbours, and leading/trailing gaps step by
+    `default_dur`, so captions cover the whole clip. `words` is mutated and
+    returned; [] is returned only when nothing is timed at all.
+    """
+    def timed(w):
+        return w["start"] is not None and w["end"] is not None
+
+    n = len(words)
+    if not any(timed(w) for w in words):
+        return []
+
+    i = 0
+    while i < n:
+        if timed(words[i]):
+            i += 1
+            continue
+        j = i
+        while j < n and not timed(words[j]):
+            j += 1
+        left_end = words[i - 1]["end"] if i > 0 else None
+        right_start = words[j]["start"] if j < n else None
+        count = j - i
+        if left_end is not None and right_start is not None and right_start > left_end:
+            step = (right_start - left_end) / count
+            for k in range(count):
+                words[i + k]["start"] = left_end + step * k
+                words[i + k]["end"] = left_end + step * (k + 1)
+        elif left_end is not None:  # trailing gap
+            for k in range(count):
+                words[i + k]["start"] = left_end + default_dur * k
+                words[i + k]["end"] = left_end + default_dur * (k + 1)
+        else:  # leading gap — step back from the first known start
+            base = (right_start or 0.0) - default_dur * count
+            for k in range(count):
+                words[i + k]["start"] = max(0.0, base + default_dur * k)
+                words[i + k]["end"] = max(0.0, base + default_dur * (k + 1))
+        i = j
+    return words
+
+
 def _build_sentence_transcript(word_segments, max_words_per_sentence=50):
     sentences = []
     current_words = []
@@ -906,6 +994,20 @@ class ClipCast:
         else:
             all_moments, chunk_sources = _run_mode(clip_mode)
 
+        # Drop clips that are too short to stand on their own (the "3-second
+        # clip" bug) — a single floor applied after every mode's moments are in.
+        def _clip_seconds(m: dict) -> float:
+            try:
+                return float(m["end"]) - float(m["start"])
+            except (KeyError, TypeError, ValueError):
+                return 0.0
+
+        before_floor = len(all_moments)
+        all_moments = [m for m in all_moments if _clip_seconds(m) >= MIN_CLIP_SECONDS]
+        dropped_short = before_floor - len(all_moments)
+        if dropped_short:
+            print(f"Dropped {dropped_short} clip(s) shorter than {MIN_CLIP_SECONDS:.0f}s")
+
         summary = {
             "total_chunks": len(chunks),
             "gemini_chunks": chunk_sources.count("gemini"),
@@ -942,16 +1044,34 @@ class ClipCast:
 
         print(f"Transcription and alignment took {time.time() - start_time:.2f} seconds")
 
-        segments = []
-        if "word_segments" in result:
-            for ws in result["word_segments"]:
-                if "start" not in ws or "end" not in ws:
-                    continue
-                segments.append({
-                    "start": ws["start"],
-                    "end": ws["end"],
-                    "word": ws.get("word", ""),
-                })
+        import math
+
+        def _num(v):
+            """Coerce to float, treating NaN/None/garbage as 'unknown' so it can
+            be interpolated rather than silently poisoning the caption times."""
+            try:
+                f = float(v)
+                return None if math.isnan(f) else f
+            except (TypeError, ValueError):
+                return None
+
+        words = []
+        for ws in result.get("word_segments") or []:
+            word = (ws.get("word") or "").strip()
+            if not word:
+                continue
+            words.append({
+                "word": word,
+                "start": _num(ws.get("start")),
+                "end": _num(ws.get("end")),
+            })
+        # Interpolate any un-aligned stretches so captions cover the whole clip.
+        words = _fill_word_times(words)
+        segments = [
+            {"start": w["start"], "end": w["end"], "word": w["word"]}
+            for w in words
+            if w["start"] is not None and w["end"] is not None
+        ]
         del result, audio
         torch.cuda.empty_cache()
         return json.dumps(segments)
@@ -1141,10 +1261,15 @@ class ClipCast:
                         watermark_text=request.watermark_text,
                     )
                 else:
+                    # User's own color wins; otherwise auto-theme the highlight
+                    # by the clip's mood/category (None → brand default).
+                    effective_caption_color = request.caption_color or _category_highlight_hex(
+                        moment.get("category")
+                    )
                     record = process_clip(
                         base_dir, video_path, request.s3_key,
                         moment["start"], moment["end"], index, transcript_segments, moment["title"],
-                        caption_color=request.caption_color,
+                        caption_color=effective_caption_color,
                         watermark_text=request.watermark_text,
                     )
                 # Per-clip category: a fixed label ("Q&A", "Educational", …)

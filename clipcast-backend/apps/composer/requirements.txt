@@ -1,0 +1,21 @@
+# clipcast-composer — ACE-Step neural instrumental generator.
+# Deliberately its OWN image, fully isolated from the mixer (which runs
+# Demucs/MusicGen/Audiobox with a different torch/transformers pin). Nothing
+# here can disturb the mixer's pins — the mixer calls this app remotely and
+# falls back to its deterministic composer if this app is unavailable.
+
+# Torch pinned to match ACE-Step's tested CUDA 12.1 wheels.
+torch==2.4.1
+torchaudio==2.4.1
+torchvision==0.19.1
+
+# ACE-Step (Apache-2.0) — installs the `acestep` package + its own pinned deps
+# (diffusers, transformers==4.50.0, pytorch_lightning, spacy, …).
+acestep @ git+https://github.com/ace-step/ACE-Step.git
+
+# Audio I/O + AWS + web/Modal.
+soundfile>=0.12.1
+numpy>=1.26.0,<2.0
+boto3>=1.34.0
+fastapi[standard]>=0.110.0
+modal>=0.64.0

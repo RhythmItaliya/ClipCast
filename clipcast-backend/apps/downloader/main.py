@@ -38,6 +38,10 @@ class DownloadVideoRequest(BaseModel):
     youtube_url: str | None = None
     s3_key: str | None = None
     call_id: str | None = None
+    # Audio jobs (the Audio Studio mixer) only need the audio track — grabbing
+    # bestaudio instead of the full up-to-4K video+merge is much faster/smaller.
+    # Defaults false so the clip pipeline keeps pulling video, unchanged.
+    audio_only: bool = False
 
 
 class DurationRequest(BaseModel):
@@ -155,7 +159,13 @@ def _load_free_proxies() -> list[str]:
     return urls
 
 
-def _run_yt_dlp(url: str, output_template: pathlib.Path, proxy: str, timeout: float):
+def _run_yt_dlp(
+    url: str,
+    output_template: pathlib.Path,
+    proxy: str,
+    timeout: float,
+    audio_only: bool = False,
+):
     command = [
         sys.executable,
         "-m",
@@ -169,13 +179,19 @@ def _run_yt_dlp(url: str, output_template: pathlib.Path, proxy: str, timeout: fl
         "--socket-timeout", "30",
         "--concurrent-fragments", "4",
         "--sleep-requests", "1",
-        # Preserve up to 4K. Merging/remuxing does not re-encode.
-        "-f", "bv*[height<=2160]+ba/b[height<=2160]/b",
-        "--merge-output-format", "mp4",
-        "--remux-video", "mp4",
-        "-o", str(output_template),
-        url,
     ]
+    if audio_only:
+        # Grab the best audio-only stream in its native container (no re-encode,
+        # no video, no merge) — the mixer re-extracts to 44.1 kHz wav anyway.
+        command += ["-f", "bestaudio/best"]
+    else:
+        # Preserve up to 4K. Merging/remuxing does not re-encode.
+        command += [
+            "-f", "bv*[height<=2160]+ba/b[height<=2160]/b",
+            "--merge-output-format", "mp4",
+            "--remux-video", "mp4",
+        ]
+    command += ["-o", str(output_template), url]
     return subprocess.run(command, capture_output=True, text=True, timeout=timeout)
 
 
@@ -198,7 +214,7 @@ def _finished_files(base_dir: pathlib.Path) -> list[pathlib.Path]:
     secrets=[modal.Secret.from_name("clipcast-secret")],
     volumes={str(VOLUME_MOUNT): proxy_volume},
 )
-def download_youtube_video_worker(youtube_url: str, s3_key: str):
+def download_youtube_video_worker(youtube_url: str, s3_key: str, audio_only: bool = False):
     base_dir = pathlib.Path("/tmp") / str(uuid.uuid4())
     base_dir.mkdir(parents=True, exist_ok=True)
     output_template = base_dir / "source.%(ext)s"
@@ -234,7 +250,8 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str):
             print(f"Attempt {attempt}: downloading via proxy #{attempt}")
             try:
                 result = _run_yt_dlp(
-                    youtube_url, output_template, proxy, timeout=remaining
+                    youtube_url, output_template, proxy, timeout=remaining,
+                    audio_only=audio_only,
                 )
             except subprocess.TimeoutExpired:
                 last_error = "Download timed out through the proxy."
@@ -300,7 +317,9 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str):
                 str(source_path),
                 os.environ["S3_BUCKET_NAME"],
                 s3_key,
-                ExtraArgs={"ContentType": "video/mp4"},
+                ExtraArgs={
+                    "ContentType": "audio/mp4" if audio_only else "video/mp4"
+                },
             )
         except Exception as s3_err:
             raise HTTPException(
@@ -434,7 +453,7 @@ def download_youtube_video(
         )
 
     function_call = download_youtube_video_worker.spawn(
-        request.youtube_url, request.s3_key
+        request.youtube_url, request.s3_key, request.audio_only
     )
     return JSONResponse(
         {"status": "accepted", "call_id": function_call.object_id},
