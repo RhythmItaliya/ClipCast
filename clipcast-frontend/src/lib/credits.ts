@@ -52,6 +52,24 @@ const DURATION_JITTER_TOLERANCE_SECONDS = 0.05;
  *   multipliers compose correctly instead of double-rounding — and a job
  *   can never round down to 0 credits even after a discount.
  */
+// ── Audio Studio (docs/14) ─────────────────────────────────────────────────
+// Flat per-job pricing rather than per-minute: a generated track is short and
+// cheap; a mashup runs two downloads + two Demucs passes + analysis + render,
+// so it costs more. Tune once real GPU-seconds are measured, the same way the
+// All-mode multiplier was set.
+export const AUDIO_GENERATE_CREDITS = 1;
+export const AUDIO_MASHUP_CREDITS = 3;
+
+export function creditsForAudio(
+  audioMode: string | undefined,
+  sourceCount = 2,
+): number {
+  if (audioMode !== "mashup") return AUDIO_GENERATE_CREDITS;
+  // N-source mixes run extra downloads, stem separation, and alignment passes.
+  // Keep the old 2-source price, then add a small per-source surcharge.
+  return AUDIO_MASHUP_CREDITS + Math.max(0, sourceCount - 2);
+}
+
 export function creditsForDuration(
   durationSeconds: number,
   opts: { clipMode?: string; isPreview?: boolean } = {},

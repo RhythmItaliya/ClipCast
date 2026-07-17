@@ -2,147 +2,147 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-    provider  = "postgresql"
-    // NOTE: When using mysql or sqlserver, uncomment the @db.Text annotations in model Account below
-    // Further reading:
-    // https://next-auth.js.org/adapters/prisma#create-the-prisma-schema
-    // https://www.prisma.io/docs/reference/api-reference/prisma-schema-reference#string
-    url       = env("DATABASE_URL")       // transaction pooler — used at runtime (port 6543)
-    directUrl = env("DIRECT_URL")         // session pooler — used for migrations (port 5432)
+  provider  = "postgresql"
+  // NOTE: When using mysql or sqlserver, uncomment the @db.Text annotations in model Account below
+  // Further reading:
+  // https://next-auth.js.org/adapters/prisma#create-the-prisma-schema
+  // https://www.prisma.io/docs/reference/api-reference/prisma-schema-reference#string
+  url       = env("DATABASE_URL") // transaction pooler — used at runtime (port 6543)
+  directUrl = env("DIRECT_URL") // session pooler — used for migrations (port 5432)
 }
 
 model Post {
-    id        Int      @id @default(autoincrement())
-    name      String
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+  id        Int      @id @default(autoincrement())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-    createdBy   User   @relation(fields: [createdById], references: [id])
-    createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+  createdById String
 
-    @@index([name])
+  @@index([name])
 }
 
 // Necessary for Next auth
 model Account {
-    id                       String  @id @default(cuid())
-    userId                   String
-    type                     String
-    provider                 String
-    providerAccountId        String
-    refresh_token            String? // @db.Text
-    access_token             String? // @db.Text
-    expires_at               Int?
-    token_type               String?
-    scope                    String?
-    id_token                 String? // @db.Text
-    session_state            String?
-    user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-    refresh_token_expires_in Int?
+  id                       String  @id @default(cuid())
+  userId                   String
+  type                     String
+  provider                 String
+  providerAccountId        String
+  refresh_token            String? // @db.Text
+  access_token             String? // @db.Text
+  expires_at               Int?
+  token_type               String?
+  scope                    String?
+  id_token                 String? // @db.Text
+  session_state            String?
+  user                     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refresh_token_expires_in Int?
 
-    @@unique([provider, providerAccountId])
-    @@index([userId])
+  @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model Session {
-    id           String   @id @default(cuid())
-    sessionToken String   @unique
-    userId       String
-    expires      DateTime
-    user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-    @@index([userId])
+  @@index([userId])
 }
 
 // Role enum — USER is the default, ADMIN gets access to /admin
 enum Role {
-    USER
-    ADMIN
+  USER
+  ADMIN
 }
 
 model User {
-    id            String    @id @default(cuid())
-    name          String?
-    email         String   @unique
-    emailVerified DateTime?
-    password      String?
-    role          Role      @default(USER)
-    credits       Int @default(20)
-    banned        Boolean   @default(false)
-    stripeCustomerId String? @unique
-    image         String?
-    accounts      Account[]
-    sessions      Session[]
-    posts         Post[]
+  id               String    @id @default(cuid())
+  name             String?
+  email            String    @unique
+  emailVerified    DateTime?
+  password         String?
+  role             Role      @default(USER)
+  credits          Int       @default(20)
+  banned           Boolean   @default(false)
+  stripeCustomerId String?   @unique
+  image            String?
+  accounts         Account[]
+  sessions         Session[]
+  posts            Post[]
 
-    uploadedFiles UploadedFile[]
-    clips Clip[]
-    purchases Purchase[]
-    creditTransactions CreditTransaction[]
-    auditLogs AdminAuditLog[] @relation("AuditActor")
+  uploadedFiles      UploadedFile[]
+  clips              Clip[]
+  purchases          Purchase[]
+  creditTransactions CreditTransaction[]
+  auditLogs          AdminAuditLog[]     @relation("AuditActor")
 
-    youtubeChannelId    String?
-    youtubeChannelName  String?
-    youtubeAccessToken  String?
-    youtubeRefreshToken String?
-    youtubeTokenExpiry  DateTime?
-    youtubeAutoClip     Boolean @default(false)
-    // Candidate channels awaiting a pick when the connected Google account
-    // has more than one (legacy multi-channel accounts, or several Brand
-    // Accounts). Array of {id, title}. Cleared once one is selected.
-    youtubePendingChannels Json?
+  youtubeChannelId       String?
+  youtubeChannelName     String?
+  youtubeAccessToken     String?
+  youtubeRefreshToken    String?
+  youtubeTokenExpiry     DateTime?
+  youtubeAutoClip        Boolean   @default(false)
+  // Candidate channels awaiting a pick when the connected Google account
+  // has more than one (legacy multi-channel accounts, or several Brand
+  // Accounts). Array of {id, title}. Cleared once one is selected.
+  youtubePendingChannels Json?
 
-    // Notification preferences shown as toggles in Settings — persisted so
-    // the mail sender can actually respect them, rather than the switches
-    // being decorative UI.
-    notifyClipReady       Boolean @default(true)
-    notifyWeeklySummary   Boolean @default(true)
-    notifyJobFailed       Boolean @default(true)
-    notifyProductUpdates  Boolean @default(false)
+  // Notification preferences shown as toggles in Settings — persisted so
+  // the mail sender can actually respect them, rather than the switches
+  // being decorative UI.
+  notifyClipReady      Boolean @default(true)
+  notifyWeeklySummary  Boolean @default(true)
+  notifyJobFailed      Boolean @default(true)
+  notifyProductUpdates Boolean @default(false)
 
-    // Clip appearance: active-word caption highlight color ("#RRGGBB",
-    // null = brand default) and an optional personal watermark burned into
-    // clips (null/empty = no watermark at all).
-    captionColor  String?
-    watermarkText String?
+  // Clip appearance: active-word caption highlight color ("#RRGGBB",
+  // null = brand default) and an optional personal watermark burned into
+  // clips (null/empty = no watermark at all).
+  captionColor  String?
+  watermarkText String?
 
-    createdAt DateTime @default(now())
-    updatedAt DateTime @default(now()) @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 // One-time login codes for the "email me a code" sign-in method — a
 // separate table (not the NextAuth VerificationToken one) because OTPs
 // need attempt-limiting and a consumed flag that model doesn't have.
 model LoginOtp {
-    id         String    @id @default(cuid())
-    email      String
-    codeHash   String
-    expiresAt  DateTime
-    consumedAt DateTime?
-    attempts   Int       @default(0)
-    createdAt  DateTime  @default(now())
+  id         String    @id @default(cuid())
+  email      String
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
 
-    @@index([email])
+  @@index([email])
 }
 
 model Purchase {
-    id               String   @id @default(cuid())
-    userId           String
-    user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-    stripeSessionId  String   @unique
-    stripeCustomerId String?
-    priceId          String
-    pack             String   // "small" | "medium" | "large"
-    credits          Int
-    amountTotal      Int      // cents
-    currency         String
-    createdAt        DateTime @default(now())
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeSessionId  String   @unique
+  stripeCustomerId String?
+  priceId          String
+  pack             String // "small" | "medium" | "large"
+  credits          Int
+  amountTotal      Int // cents
+  currency         String
+  createdAt        DateTime @default(now())
 
-    @@index([userId])
+  @@index([userId])
 }
 
 // Full credit ledger — every event that changes a user's balance, not just
@@ -150,112 +150,131 @@ model Purchase {
 // negative = debited) so the whole history can be summed/replayed; balanceAfter
 // is a denormalized snapshot for fast display without recomputing a running sum.
 model CreditTransaction {
-    id             String   @id @default(cuid())
-    userId         String
-    user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-    type           String   // "purchase" | "job_charge" | "admin_adjust"
-    amount         Int      // signed: positive = credited, negative = debited
-    balanceAfter   Int
-    description    String?
-    uploadedFileId String?  // set for type "job_charge"
-    purchaseId     String?  // set for type "purchase"
-    createdAt      DateTime @default(now())
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           String // "purchase" | "job_charge" | "admin_adjust"
+  amount         Int // signed: positive = credited, negative = debited
+  balanceAfter   Int
+  description    String?
+  uploadedFileId String? // set for type "job_charge"
+  purchaseId     String? // set for type "purchase"
+  createdAt      DateTime @default(now())
 
-    @@index([userId, createdAt])
+  @@index([userId, createdAt])
 }
 
 // Tracks admin mutations (credit adjustments, bans, role changes, job resets, clip
 // deletes). adminId is nullable + SetNull so the trail survives if the acting admin's
 // account is later deleted; adminEmail is denormalized for the same reason.
 model AdminAuditLog {
-    id         String   @id @default(cuid())
-    adminId    String?
-    admin      User?    @relation("AuditActor", fields: [adminId], references: [id], onDelete: SetNull)
-    adminEmail String
-    action     String
-    targetType String
-    targetId   String?
-    detail     String?
-    createdAt  DateTime @default(now())
+  id         String   @id @default(cuid())
+  adminId    String?
+  admin      User?    @relation("AuditActor", fields: [adminId], references: [id], onDelete: SetNull)
+  adminEmail String
+  action     String
+  targetType String
+  targetId   String?
+  detail     String?
+  createdAt  DateTime @default(now())
 
-    @@index([adminId])
-    @@index([createdAt])
+  @@index([adminId])
+  @@index([createdAt])
 }
 
 model UploadedFile {
-    id String @id @default(cuid())
-    s3Key String
-    displayName String?
-    youtubeUrl  String?
-    uploaded Boolean @default(false)
-    status String @default("queued") // processing, processed, no credits, failed
-    clipMode String? @default("qa")
-    isPreview Boolean? @default(false)
-    duration    Int?
-    // Friendly, non-technical message shown to the job's own user. Never
-    // contains raw backend detail (HTTP codes, proxy/S3/Modal internals) —
-    // that goes in internalErrorDetail instead, for admins only.
-    errorMessage String?
-    // Raw technical failure detail (HTTP status, stderr, proxy/Modal error
-    // text). Only ever shown in the admin panel, never to the job's user.
-    internalErrorDetail String?
-    // Human-readable record of which model/service handled each stage of this
-    // job (e.g. "WhisperX large-v2 (transcription) · Gemini 2.5 Flash 8/9
-    // chunk(s) (moments), HF fallback Qwen/Qwen2.5-7B-Instruct 1/9 · TalkNet
-    // ASD (speaker detection)"). Built in clipcast-backend/apps/processor.
-    processingSummary String?
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  s3Key               String
+  displayName         String?
+  youtubeUrl          String?
+  uploaded            Boolean  @default(false)
+  status              String   @default("queued") // processing, processed, no credits, failed
+  clipMode            String?  @default("qa")
+  isPreview           Boolean? @default(false)
+  duration            Int?
+  // ── Audio Studio (docs/14, docs/15) ──────────────────────────────────
+  // All nullable/defaulted so this is a non-destructive `db push`: every
+  // existing clip job keeps jobType "clip" automatically. Audio jobs reuse
+  // this same table (the job) and Clip (the output) — no separate DB.
+  jobType             String?  @default("clip") // "clip" | "audio"
+  audioMode           String? // "generate" | "mashup" (audio jobs)
+  // Mashup: youtubeUrl above holds the VOCAL track's URL; this holds the
+  // BED (instrumental) track's URL.
+  bedYoutubeUrl       String?
+  // Generate: the user's text prompt + chosen genre preset.
+  audioGenre          String?
+  audioPrompt         String?
+  // Advanced Audio Studio: ordered list of one or more user sources.
+  // Each item is {kind: "youtube"|"s3", url?, s3Key?, role?, label?}.
+  audioSources        Json?
+  // Friendly, non-technical message shown to the job's own user. Never
+  // contains raw backend detail (HTTP codes, proxy/S3/Modal internals) —
+  // that goes in internalErrorDetail instead, for admins only.
+  errorMessage        String?
+  // Raw technical failure detail (HTTP status, stderr, proxy/Modal error
+  // text). Only ever shown in the admin panel, never to the job's user.
+  internalErrorDetail String?
+  // Human-readable record of which model/service handled each stage of this
+  // job (e.g. "WhisperX large-v2 (transcription) · Gemini 2.5 Flash 8/9
+  // chunk(s) (moments), HF fallback Qwen/Qwen2.5-7B-Instruct 1/9 · TalkNet
+  // ASD (speaker detection)"). Built in clipcast-backend/apps/processor.
+  processingSummary   String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-    clips Clip[]
+  clips Clip[]
 
-    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-    userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
 
-    @@index([s3Key])
-    // Dashboard list + rolling 24h upload count
-    @@index([userId, createdAt])
-    // Active-job counts for usage limits and queue status
-    @@index([userId, status])
+  @@index([s3Key])
+  // Dashboard list + rolling 24h upload count
+  @@index([userId, createdAt])
+  // Active-job counts for usage limits and queue status
+  @@index([userId, status])
 }
 
 model Clip {
-    id String @id @default(cuid())
-    s3Key String
-    isPreview Boolean @default(false)
-    clipMode  String  @default("qa")
+  id        String  @id @default(cuid())
+  s3Key     String
+  isPreview Boolean @default(false)
+  clipMode  String  @default("qa")
 
-    // AI-generated title (Gemini, alongside moment selection) + a rendered
-    // preview frame + duration in seconds — null for clips rendered before
-    // this feature existed (UI falls back to a filename-derived title/no thumb).
-    title          String?
-    thumbnailS3Key String?
-    duration       Int?
+  // AI-generated title (Gemini, alongside moment selection) + a rendered
+  // preview frame + duration in seconds — null for clips rendered before
+  // this feature existed (UI falls back to a filename-derived title/no thumb).
+  title          String?
+  thumbnailS3Key String?
+  duration       Int?
+  // "video" (clips, default) | "audio" (Audio Studio output). For audio,
+  // s3Key is the MP3 master and wavS3Key is the lossless WAV master.
+  mediaType      String? @default("video")
+  wavS3Key       String?
 
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-    // Set once this clip has been posted to the user's connected YouTube
-    // channel — lets the UI show "Posted" instead of "Post to YouTube" and
-    // stops a second upload of the same clip.
-    youtubeVideoId    String?
-    youtubeUploadedAt DateTime?
+  // Set once this clip has been posted to the user's connected YouTube
+  // channel — lets the UI show "Posted" instead of "Post to YouTube" and
+  // stops a second upload of the same clip.
+  youtubeVideoId    String?
+  youtubeUploadedAt DateTime?
 
-    uploadedFile UploadedFile? @relation(fields: [uploadedFileId], references: [id], onDelete: Cascade)
-    uploadedFileId String?
+  uploadedFile   UploadedFile? @relation(fields: [uploadedFileId], references: [id], onDelete: Cascade)
+  uploadedFileId String?
 
-    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-    userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
 
-    @@index([s3Key])
-    @@index([userId])
-    @@index([uploadedFileId])
+  @@index([s3Key])
+  @@index([userId])
+  @@index([uploadedFileId])
 }
 
 model VerificationToken {
-    identifier String
-    token      String   @unique
-    expires    DateTime
+  identifier String
+  token      String   @unique
+  expires    DateTime
 
-    @@unique([identifier, token])
+  @@unique([identifier, token])
 }

@@ -29,6 +29,10 @@ export const env = createEnv({
     // full download starts. Optional — falls back to the old minimum-credit
     // gate if unset, rather than blocking YouTube jobs entirely.
     YOUTUBE_DURATION_ENDPOINT: z.string().url().optional(),
+    // Audio Studio (mixer) Modal endpoint — generate + mashup. Optional so a
+    // missing URL can't take down the frontend; audio jobs report a targeted
+    // configuration error, exactly like DOWNLOAD_VIDEO_ENDPOINT.
+    PROCESS_AUDIO_ENDPOINT: z.string().url().optional(),
     PROCESS_VIDEO_ENDPOINT_AUTH: z.string(),
     STRIPE_SECRET_KEY: z.string(),
     STRIPE_SMALL_CREDIT_PACK: z.string(),
@@ -78,6 +82,7 @@ export const env = createEnv({
     PROCESS_VIDEO_ENDPOINT: process.env.PROCESS_VIDEO_ENDPOINT,
     DOWNLOAD_VIDEO_ENDPOINT: process.env.DOWNLOAD_VIDEO_ENDPOINT,
     YOUTUBE_DURATION_ENDPOINT: process.env.YOUTUBE_DURATION_ENDPOINT,
+    PROCESS_AUDIO_ENDPOINT: process.env.PROCESS_AUDIO_ENDPOINT,
     PROCESS_VIDEO_ENDPOINT_AUTH: process.env.PROCESS_VIDEO_ENDPOINT_AUTH,
     NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:
       process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
