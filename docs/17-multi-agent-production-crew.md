@@ -178,9 +178,14 @@ The `ProductionLog` is persisted per job and surfaced as a **Production Room**:
 ## 10. Phased build (each independently shippable)
 
 1. **Framework** — `agents/` module (Agent/Decision/State/Log/Crew) + mock-LLM
-   CPU tests. No behavior change yet.
+   CPU tests. No behavior change yet. **✅ Built** (`clipcast-backend/crew`).
 2. **Music crew** — port the mixer's director into the crew; add Composer/
    Arranger/Engineer/Critic; loop. Deterministic fallbacks = today's output.
+   **✅ Built** (`apps/mixer/music_crew.py`): lyricist → director → composer →
+   engineer produce the plan + ProductionLog that drives the render; headless
+   fallbacks == the pre-crew plan; CPU-tested in `apps/mixer/test_music_crew.py`.
+   (Currently a planning crew, `max_rounds=1`; the render-in-the-loop critic is
+   a later refinement — the framework already supports it, §5.)
 3. **Clip crew** — Story Editor/Writer/**Colorist**/Director/Critic; dynamic
    caption RGB replaces the hardcoded map.
 4. **Observability** — persist + stream the log; the Production Room UI.

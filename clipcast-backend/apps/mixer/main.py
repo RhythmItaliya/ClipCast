@@ -83,29 +83,12 @@ image = (
     )
     .pip_install_from_requirements("requirements.txt")
     .env({"TORCH_HOME": CACHE, "HF_HOME": CACHE})
-    .add_local_python_source("audio_engine")
+    .add_local_python_source("audio_engine", "crew", "music_crew")
 )
 
 app = modal.App("clipcast-mixer", image=image)
 auth_scheme = HTTPBearer()
 model_volume = modal.Volume.from_name("clipcast-mixer-models", create_if_missing=True)
-
-
-def _strip_json(raw: str):
-    """Parse a JSON object from an LLM reply, tolerating ```json fences."""
-    import json
-
-    text = (raw or "").strip()
-    if text.startswith("```json"):
-        text = text[len("```json"):]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    try:
-        return json.loads(text.strip())
-    except (ValueError, TypeError):
-        return None
 
 
 def _s3():
@@ -257,49 +240,50 @@ class ClipCastMixer:
             print(f"lyric transcription failed: {e}")
             return ""
 
-    def _producer_plan(
-        self, lyrics: str, genre: str, target_bpm: float, key_name: str, quality: str
-    ) -> dict:
-        """Act like a producer: read the lyric's emotion + the target genre and
-        decide the mood + a genre instrumental prompt for ACE-Step. Falls back to
-        a deterministic genre plan when Gemini/lyrics are unavailable."""
-        mellow = genre.split()[0] in {"lofi", "ambient", "cinematic", "lofi-bollywood"}
-        fallback = {
-            "mood": "introspective, mellow" if mellow else "energetic, bright",
-            "bed_prompt": (
-                f"{genre} instrumental, {target_bpm:.0f} BPM, key {key_name} {quality}, "
-                "clean production, no vocals, tight drums, musical, cohesive"
-            ),
-            "fx_bias": "clean" if mellow else "viral",
-            "note": f"deterministic {genre} plan",
+    def _gemini_llm(self):
+        """Wrap the warm Gemini client in the crew's LLM protocol (or None so
+        the crew runs headless on deterministic fallbacks)."""
+        client = getattr(self, "gemini", None)
+        if client is None:
+            return None
+
+        class _GeminiLLM:
+            def complete(self, system: str, user: str) -> str:
+                resp = client.models.generate_content(
+                    model="gemini-2.5-flash", contents=f"{system}\n\n{user}"
+                )
+                return resp.text or ""
+
+        return _GeminiLLM()
+
+    def _producer_plan(self, lyrics: str, genre: str, target_bpm: float, key_name: str, quality: str):
+        """Run the music crew (docs/17 §3a): lyricist → director → composer →
+        engineer produce the plan the render consumes, plus the ProductionLog.
+        Returns (plan, production_log). Never raises — agents fall back."""
+        from music_crew import music_plan
+
+        brief = {
+            "genre": genre,
+            "target_bpm": target_bpm,
+            "key_name": key_name,
+            "quality": quality,
+            "lyrics": (lyrics or "")[:1500],
         }
-        if not getattr(self, "gemini", None) or not lyrics:
-            return fallback
         try:
-            prompt = (
-                "You are a music producer remixing a song INTO a target genre. "
-                "Read the lyrics' emotion + themes and plan a production that fits "
-                "both the lyric and the genre (e.g. a sad lyric → mellow, sparse "
-                "lofi). Return STRICT JSON only, keys: mood (short phrase), "
-                "bed_prompt (a text-to-music prompt for an instrumental in the "
-                f"target genre; include {target_bpm:.0f} BPM and key {key_name} "
-                f"{quality}; no vocals; under 60 words), fx_bias (\"clean\" or "
-                "\"viral\"). No prose, no code fences.\n"
-                f"Target genre: {genre}\n"
-                f"Lyrics (may be partial):\n{lyrics[:1500]}"
-            )
-            resp = self.gemini.models.generate_content(
-                model="gemini-2.5-flash", contents=prompt
-            )
-            data = _strip_json(resp.text or "")
-            if isinstance(data, dict) and data.get("bed_prompt"):
-                data.setdefault("mood", fallback["mood"])
-                data.setdefault("fx_bias", fallback["fx_bias"])
-                data["note"] = f"Gemini plan · mood {str(data['mood'])[:40]}"
-                return data
+            return music_plan(self._gemini_llm(), brief)
         except Exception as e:  # noqa: BLE001
-            print(f"producer plan failed, using deterministic: {e}")
-        return fallback
+            print(f"music crew failed, using deterministic plan: {e}")
+            mellow = (genre or "").split()[0] in {"lofi", "ambient", "cinematic"}
+            plan = {
+                "mood": "introspective, mellow" if mellow else "energetic, bright",
+                "bed_prompt": (
+                    f"{genre} instrumental, {target_bpm:.0f} BPM, key {key_name} {quality}, "
+                    "clean production, no vocals, tight drums, musical, cohesive"
+                ),
+                "fx_bias": "clean" if mellow else "viral",
+                "note": f"deterministic {genre} plan",
+            }
+            return plan, []
 
     # ── Neural genre bed (ACE-Step, isolated app) ─────────────────────────────
     def _neural_bed(
@@ -518,7 +502,9 @@ class ClipCastMixer:
         lead_key = ae._PITCHES[built[0]["key_root"] % 12]
         lead_quality = "minor" if built[0]["is_minor"] else "major"
         lyrics = self._transcribe_lyrics(str(vocal_pick["vocals"]))
-        plan = self._producer_plan(lyrics, style_label, target_bpm, lead_key, lead_quality)
+        plan, production_log = self._producer_plan(
+            lyrics, style_label, target_bpm, lead_key, lead_quality
+        )
         director_prompt = plan["bed_prompt"]
 
         # Neural genre bed (ACE-Step) + melody re-instrumentation (basic-pitch →
@@ -633,6 +619,9 @@ class ClipCastMixer:
             "success": True,
             "clips": clips,
             "sources_genres": source_genres,
+            # The crew's decision transcript (docs/17 §6) — surfaced in the
+            # Production Room UI once persisted (Phase 4).
+            "production_log": production_log,
             # top-level fields = first clip, for older single-result callers.
             "duration": first["duration"],
             "s3_key": first["s3_key"],
