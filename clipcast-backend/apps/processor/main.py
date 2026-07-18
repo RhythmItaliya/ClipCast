@@ -842,6 +842,8 @@ class ClipCast:
             return None
 
         class _GeminiLLM:
+            name = "gemini-2.5-flash"  # shown in the admin observability log
+
             def complete(self, system: str, user: str) -> str:
                 resp = client.models.generate_content(
                     model="gemini-2.5-flash", contents=f"{system}\n\n{user}"

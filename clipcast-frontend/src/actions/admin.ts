@@ -283,6 +283,39 @@ export async function getAdminJobs(
   return { jobs, total, page, pageSize };
 }
 
+/**
+ * Full detail for one job (admin) — every field plus the multi-agent
+ * production log, so an admin can see WHO/WHAT/WHY/HOW each step ran (which
+ * crew role, real model vs fallback + model name) and the full error context.
+ */
+export async function getAdminJob(id: string) {
+  await requireAdmin();
+
+  return db.uploadedFile.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      displayName: true,
+      youtubeUrl: true,
+      status: true,
+      jobType: true,
+      clipMode: true,
+      audioMode: true,
+      audioGenre: true,
+      isPreview: true,
+      duration: true,
+      errorMessage: true,
+      internalErrorDetail: true,
+      processingSummary: true,
+      productionLog: true,
+      createdAt: true,
+      updatedAt: true,
+      user: { select: { id: true, email: true, name: true } },
+      _count: { select: { clips: true } },
+    },
+  });
+}
+
 /** Reset all stuck (queued / processing) jobs to failed. */
 export async function resetAllStuckJobs() {
   const admin = await requireAdmin();

@@ -105,6 +105,16 @@ export function ProductionRoom({
                       </span>
                     </>
                   )}
+                  {/* WHO executed it — the real model, or the fallback. */}
+                  {e.source === "llm" ? (
+                    <span className="bg-brand-soft text-brand rounded-full px-2 py-0.5 text-[10px] font-medium">
+                      {e.model ?? "model"}
+                    </span>
+                  ) : e.source === "fallback" ? (
+                    <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[10px] font-medium">
+                      fallback
+                    </span>
+                  ) : null}
                   {typeof e.clip === "number" && (
                     <span className="text-muted-foreground ml-auto text-[11px]">
                       clip #{e.clip + 1}
@@ -124,7 +134,12 @@ export function ProductionRoom({
                     “{e.rationale}”
                   </p>
                 )}
-                {e.note && (
+                {e.error && (
+                  <p className="text-destructive mt-1 text-xs">
+                    ⚠ model failed → fallback: {e.error}
+                  </p>
+                )}
+                {e.note && !e.error && (
                   <p className="text-muted-foreground mt-1 text-xs">↳ {e.note}</p>
                 )}
               </div>

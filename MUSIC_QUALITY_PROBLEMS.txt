@@ -1,0 +1,108 @@
+================================================================================
+CLIPCAST — PROBLEMS TO SOLVE TO MAKE THE MUSIC POWERFUL
+Last updated: 2026-07-18
+================================================================================
+This is the honest, prioritized list of what still limits audio quality in the
+Audio Studio mixer (apps/mixer), and the concrete open-source fix for each.
+Ordered by audible impact. "[built]" = already done; everything else is open.
+
+Current pipeline (built): audio-only download -> Demucs htdemucs_ft 4-stem ->
+BPM/key/hook analysis -> AI Music Director crew (lyricist->director->composer->
+engineer, Gemini + fallbacks) -> ACE-Step neural genre bed (isolated app) ->
+deterministic genre composer -> FX chain -> Audiobox-Aesthetics-scored redo ->
+reference master (Matchering). Full crew decisions are logged to the admin
+Production Room.
+
+--------------------------------------------------------------------------------
+P0 — THE BIGGEST QUALITY BLOCKERS
+--------------------------------------------------------------------------------
+[ ] 1. VOCAL-ON-GENERATED-BED HARMONIC CLASH (the #1 issue).
+       The ACE-Step bed is generated fresh; the original vocal has its own
+       chords. Laying one on the other can clash harmonically.
+       Fix options:
+         a. Key-lock the ACE-Step bed to the vocal's key (currently only TEMPO
+            is locked — see P1.4). Pitch-shift the generated bed via Rubber Band
+            to the vocal's Camelot key.
+         b. Chord-condition the generation: detect the vocal's chord progression
+            (e.g. Chordino/madmom) and put it in the ACE-Step prompt.
+         c. Keep the neural bed as texture UNDER the original key-matched
+            instrumental (already the default), but raise/lower its level by a
+            measured clash score, not a fixed strength.
+       This one needs a listen-and-tune pass on real GPU output.
+
+[ ] 2. MELODY RE-INSTRUMENTATION IS CURRENTLY OFF. [regression to fix]
+       basic-pitch pulls the full TensorFlow and pretty_midi fails its wheel
+       build, which broke the mixer image, so it was removed. reinstrument_
+       melody() is None-safe, so the tune isn't carried into the new genre yet.
+       Fix: re-add with a LIGHTWEIGHT backend —
+         pip install "basic-pitch[onnxruntime]"  (avoids TensorFlow)
+         pretty_midi via --no-build-isolation (numpy already present)
+       in a SEPARATE image layer, plus the fluidsynth + fluid-soundfont-gm apt.
+
+[ ] 3. NO EXPLICIT "INSTRUMENTAL-ONLY" MODE.
+       The mixer auto-detects tune-only sections but can't be TOLD to drop
+       vocals for a pure instrumental mix.
+       Fix: add `instrumental_only: bool` to ProcessAudioRequest; when set,
+       force every part's tune_only=True (skip the vocal overlay). Frontend: an
+       "Instrumental only" toggle on the AI-mix tab.
+
+--------------------------------------------------------------------------------
+P1 — TIGHTEN THE MUSICAL FOUNDATION (clearly audible)
+--------------------------------------------------------------------------------
+[ ] 4. Key-lock the neural bed (see P0.1a) — bed is tempo-locked only today.
+[ ] 5. True downbeat grid, not first-beat. Tool: madmom (DBNDownBeatTracking)
+       or BeatNet. Where: audio_engine.detect_bpm_and_beats -> align on bar-ones.
+       Fixes the "in tempo but slightly off" feel.
+[ ] 6. Beat-synchronous warp (per-bar), not one global stretch ratio. Tool:
+       pyrubberband per-beat / rubberband --time-map. Corrects tempo drift
+       inside a song.
+[ ] 7. Better key detection. Tool: Essentia KeyExtractor (replaces the librosa
+       Krumhansl profile in audio_engine.detect_key).
+[ ] 8. Labelled sections (intro/verse/chorus), not energy clusters. Tool: allin1
+       (All-In-One Music Structure Analyzer) -> feed real labels to the Director
+       so the vocal chorus lands on the instrumental chorus.
+
+--------------------------------------------------------------------------------
+P2 — STUDIO-GRADE MIX / MASTER (make it sound "released")
+--------------------------------------------------------------------------------
+[ ] 9.  De-ess + clean the extracted vocal (Demucs bleed). Tool: pedalboard
+        de-esser + noisereduce, after the vocal stem, before mixing.
+[ ] 10. Bass-swap EQ + multiband ducking (only one low-end at a time), not the
+        current broadband duck. Tool: pedalboard multiband.
+[ ] 11. True-peak limiting (no inter-sample clipping on phones). Tool: pyloudnorm
+        + a look-ahead limiter, or ffmpeg alimiter, as the final stage.
+[ ] 12. Smarter reference selection for Matchering (pick the cleanest source, or
+        a genre reference track, not just source #1's own recording).
+
+--------------------------------------------------------------------------------
+P3 — MAKE THE AI DIRECTOR REDO HARDER (quality loop)
+--------------------------------------------------------------------------------
+[ ] 13. The Audiobox redo currently only re-runs the cheap FX pass. Let a low
+        score also send work back to the COMPOSER to regenerate the bed with a
+        new ACE-Step seed/prompt (the crew already supports critic reroute; wire
+        the render-in-the-loop so execute() renders+scores each round).
+[ ] 14. Optimize MORE than Production Quality — also Content Enjoyment /
+        Complexity from Audiobox, and try 2-3 arrangement candidates, keep best.
+[ ] 15. Multi-section arrangement (verse over break, chorus over drop) with
+        crossfades, not one placement per part.
+
+--------------------------------------------------------------------------------
+P4 — REACH / SCALE
+--------------------------------------------------------------------------------
+[ ] 16. N-track engine (3-6 sources): per-stem loudness-match + priority ducking
+        (vocal > lead > pads) so layers don't clip. Auto role-detection per
+        source (vocal vs instrumental energy).
+[ ] 17. More genre lanes + finer sub-genres (e.g. real "lofi hip-hop" lane, drill,
+        afrobeats) in decide_mix_style / the Director's vocabulary.
+[ ] 18. Quality tiers: "fast" (1 take, htdemucs) vs "best" (3-take rating loop +
+        Matchering + ACE-Step) — bill accordingly.
+
+--------------------------------------------------------------------------------
+NOTES / LEGAL
+--------------------------------------------------------------------------------
+- Copyright: YouTube-sourced mixes should stay private/remix output unless rights
+  are cleared. The transforms reduce direct-copy similarity but are NOT a legal
+  guarantee.
+- Every step above is observable in the admin Production Room (which crew role,
+  real model vs fallback, and errors) — use it to see where quality drops.
+================================================================================

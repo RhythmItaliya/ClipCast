@@ -8,6 +8,12 @@ export type ProductionLogEntry = {
   rationale: string;
   note: string;
   ts: number;
+  /** WHO executed it: "llm" (real model) or "fallback" (deterministic). */
+  source?: string;
+  /** The model name when source is "llm" (e.g. "gemini-2.5-flash"). */
+  model?: string | null;
+  /** Populated when a fallback fired because the model failed — for debugging. */
+  error?: string | null;
   /** Present on clip-crew entries: which clip index this decision was for. */
   clip?: number;
 };

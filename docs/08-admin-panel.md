@@ -1,5 +1,14 @@
 # ClipCast 08: Admin panel
 
+> **Update (2026-07-18): job observability.** Each row in `/admin/jobs` now
+> links to a **job-detail page** (`/admin/jobs/[id]`, action `getAdminJob`) that
+> shows the full who/what/why/how of a job: user, type/mode/genre, the
+> processing summary, the complete error context (friendly + internal) for
+> debugging, and the **multi-agent Production Room** — every crew decision with
+> which role made it, whether the **real model or the deterministic fallback**
+> ran it (+ the model name), and any per-step failure. Same RBAC as the rest of
+> admin. See docs/17 (the crew) and docs/18 (Langfuse trace dashboard).
+
 Everything lives under `src/app/admin/`, guarded by
 `src/app/admin/layout.tsx` (see [03-authentication-and-roles.md](03-authentication-and-roles.md)
 for the two-layer RBAC: layout redirect + per-action `requireAdmin()`).

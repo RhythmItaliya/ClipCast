@@ -6,8 +6,10 @@ import {
   Clock,
   Loader2,
   RefreshCw,
+  Search,
   XCircle,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
@@ -229,16 +231,25 @@ export function JobsTable({
 
                     {/* Actions */}
                     <td className="px-4 py-3">
-                      {isStuck && (
-                        <button
-                          onClick={() => handleResetOne(job.id)}
-                          disabled={isPending}
-                          title="Cancel this job"
-                          className="border-destructive/30 text-destructive hover:bg-destructive/10 flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors disabled:opacity-50"
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/admin/jobs/${job.id}`}
+                          title="Inspect this job — crew decisions, models, errors"
+                          className="border-border text-muted-foreground hover:border-brand/40 hover:text-brand flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors"
                         >
-                          <XCircle className="size-3" /> Cancel
-                        </button>
-                      )}
+                          <Search className="size-3" /> Inspect
+                        </Link>
+                        {isStuck && (
+                          <button
+                            onClick={() => handleResetOne(job.id)}
+                            disabled={isPending}
+                            title="Cancel this job"
+                            className="border-destructive/30 text-destructive hover:bg-destructive/10 flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors disabled:opacity-50"
+                          >
+                            <XCircle className="size-3" /> Cancel
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

@@ -73,6 +73,11 @@ class Decision:
     rationale: str = ""
     to_role: str | None = None  # explicit handoff target (None = follow the flow)
     note: str = ""              # note carried with the handoff
+    # WHO executed this decision — the real model ("llm") or the deterministic
+    # fallback ("fallback") — and, for an llm, its model name. This is what the
+    # admin panel reads to show "Gemini (gemini-2.5-flash)" vs "fallback".
+    source: str = "none"
+    model: str | None = None
 
 
 @dataclass
@@ -96,6 +101,8 @@ class LogEntry:
     rationale: str
     note: str
     ts: float
+    source: str = "none"        # "llm" | "fallback"
+    model: str | None = None    # model name when source == "llm"
 
     def to_dict(self) -> dict:
         return {
@@ -105,6 +112,11 @@ class LogEntry:
             "choices": self.choices,
             "rationale": self.rationale,
             "note": self.note,
+            # WHO ran it (real model vs fallback) + which model — for the admin
+            # observability view. `error` is populated only for a failed take.
+            "source": self.source,
+            "model": self.model,
+            "error": self.note if self.source == "fallback" and self.note else None,
             "ts": round(self.ts, 3),
         }
 
@@ -125,6 +137,8 @@ class ProductionLog:
                 rationale=decision.rationale,
                 note=decision.note,
                 ts=time.time(),
+                source=decision.source,
+                model=decision.model,
             )
         )
 
@@ -173,13 +187,18 @@ class Agent:
                         rationale=str(data.get("rationale", ""))[:400],
                         to_role=data.get("to_role"),
                         note=str(data.get("note", ""))[:200],
+                        source="llm",
+                        model=getattr(llm, "name", "llm"),
                     )
             except Exception as e:  # noqa: BLE001
                 return Decision(
                     role=self.role, choices=self.fallback(state),
-                    rationale="fallback", note=str(e)[:120],
+                    rationale="fallback", note=str(e)[:120], source="fallback",
                 )
-        return Decision(role=self.role, choices=self.fallback(state), rationale="fallback")
+        return Decision(
+            role=self.role, choices=self.fallback(state),
+            rationale="fallback", source="fallback",
+        )
 
 
 class Crew:
@@ -223,7 +242,9 @@ class Crew:
                 "to": decision.to_role,
                 "choices": decision.choices,
                 "rationale": decision.rationale,
-                "error": decision.note if decision.rationale == "fallback" else None,
+                "source": decision.source,
+                "model": decision.model,
+                "error": decision.note if decision.source == "fallback" and decision.note else None,
             },
         )
 

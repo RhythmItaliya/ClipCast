@@ -26,10 +26,11 @@ billing & credits (07), admin panel (08), deployment (09). Each ends with a
 - [13-clip-modes-and-ai.md](13-clip-modes-and-ai.md) — Gemini prompts per
   mode, the All fan-out + dedupe, the open-ended Any mode with AI-invented
   category tags, HF fallback, daily auto-clip cron.
-- [14-audio-studio-mode.md](14-audio-studio-mode.md) — **plan only**: AI music
-  generation + YouTube×YouTube beat-matched mashups (Demucs stems, tempo/key
-  matching, Camelot harmonic mixing, Gemini arrangement), the open-source
-  stack, and how it slots into the existing Modal/Inngest architecture.
+- [14-audio-studio-mode.md](14-audio-studio-mode.md) — **built + deployed**: AI
+  music generation + YouTube×YouTube mashups, now driven by the AI Music
+  Director crew (docs/17) with an ACE-Step neural bed and an Audiobox-scored
+  redo. Original design + open-source rationale kept; current state + gaps in
+  the doc's status banner and `MUSIC_QUALITY_PROBLEMS.txt`.
 - [15-mashup-mixing-mechanics.md](15-mashup-mixing-mechanics.md) —
   plain-language: *how we actually join two songs* — stem swapping,
   beat/grid/phrase alignment, harmonic (Camelot) key matching, transitions
