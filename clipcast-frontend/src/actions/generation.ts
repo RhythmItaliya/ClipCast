@@ -3,6 +3,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { inngest } from "~/inngest/client";
 import { auth } from "~/server/auth";
+import { checkConcurrencyLimit } from "~/server/concurrency";
 import { db } from "~/server/db";
 import { checkUsageLimits } from "~/server/usage";
 import type { ActionResult } from "~/types";
@@ -65,6 +66,9 @@ export async function processVideo(
   });
 
   if (uploadedVideo.uploaded) return { success: true };
+
+  const busyError = await checkConcurrencyLimit(session.user.id, uploadedFileId);
+  if (busyError) return { success: false, error: busyError };
 
   const validClientDuration =
     typeof clientDurationSeconds === "number" &&
@@ -131,6 +135,9 @@ export async function processYoutubeVideo(
   // Same server-side gates as direct uploads: credits, daily cap, active jobs.
   const limitError = await checkUsageLimits(session.user.id);
   if (limitError) return { success: false, error: limitError };
+
+  const busyError = await checkConcurrencyLimit(session.user.id);
+  if (busyError) return { success: false, error: busyError };
 
   const folderKey = `${uuidv4()}/original.mp4`;
 

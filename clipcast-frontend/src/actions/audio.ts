@@ -7,6 +7,7 @@ import { env } from "~/env";
 import { inngest } from "~/inngest/client";
 import { creditsForAudio } from "~/lib/credits";
 import { auth } from "~/server/auth";
+import { checkConcurrencyLimit } from "~/server/concurrency";
 import { db } from "~/server/db";
 import { checkUsageLimits } from "~/server/usage";
 import type { ActionResult } from "~/types";
@@ -190,6 +191,9 @@ export async function createAdvancedMix(
   const limitError = await checkUsageLimits(session.user.id);
   if (limitError) return { success: false, error: limitError };
 
+  const busyError = await checkConcurrencyLimit(session.user.id);
+  if (busyError) return { success: false, error: busyError };
+
   const requiredCredits = creditsForAudio("mashup", sources.length);
   const user = await db.user.findUnique({
     where: { id: session.user.id },
@@ -276,6 +280,9 @@ export async function createGeneratedTrack(
 
   const limitError = await checkUsageLimits(session.user.id);
   if (limitError) return { success: false, error: limitError };
+
+  const busyError = await checkConcurrencyLimit(session.user.id);
+  if (busyError) return { success: false, error: busyError };
 
   const requiredCredits = creditsForAudio("generate");
   const user = await db.user.findUnique({
