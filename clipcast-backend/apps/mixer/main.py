@@ -77,22 +77,17 @@ class ProcessAudioRequest(BaseModel):
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    # fluidsynth + a GM soundfont power the basic-pitch → MIDI melody replay.
-    .apt_install(
-        "ffmpeg", "rubberband-cli", "fluidsynth", "fluid-soundfont-gm"
-    )
+    .apt_install("ffmpeg", "rubberband-cli")
     .pip_install_from_requirements("requirements.txt")
     # Installed in a SEPARATE layer so pip resolves them independently of the
-    # pinned ML core — bundling everything blew up the resolver
-    # ("resolution-too-deep"). Lyric transcription + melody re-instrument + the
-    # optional Langfuse monitor.
-    .pip_install(
-        "faster-whisper>=1.0.0",
-        "basic-pitch>=0.3.0",
-        "pretty_midi>=0.2.10",
-        "pyfluidsynth>=1.3.0",
-        "langfuse>=2.0.0",
-    )
+    # pinned ML core (bundling blew up the resolver — "resolution-too-deep").
+    # Lyric transcription for the director + the optional Langfuse monitor.
+    # NOTE: melody re-instrumentation (basic-pitch/pretty_midi/pyfluidsynth) is
+    # temporarily NOT installed — basic-pitch pulls the full TensorFlow and
+    # pretty_midi fails its wheel build, breaking the image. reinstrument_melody
+    # is None-safe, so the mixer just skips that layer until it's re-added with a
+    # lightweight (ONNX) basic-pitch backend.
+    .pip_install("faster-whisper>=1.0.0", "langfuse>=2.0.0")
     .env({"TORCH_HOME": CACHE, "HF_HOME": CACHE})
     .add_local_python_source("audio_engine", "crew", "music_crew", "monitoring")
 )
