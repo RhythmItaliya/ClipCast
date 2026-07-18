@@ -851,7 +851,17 @@ export const processAudioFn = inngest.createFunction(
                 );
               }
               const s3Key = `${outPrefix}source_${index + 1}.m4a`;
-              await downloadToS3(source.url, s3Key, prefix);
+              try {
+                await downloadToS3(source.url, s3Key, prefix);
+              } catch (err) {
+                // One flaky source shouldn't kill a multi-source mix — skip it
+                // and mix the rest (we fail only if NONE download, below).
+                console.warn(
+                  `[audio] source ${index + 1} (${source.url}) download failed, skipping:`,
+                  err,
+                );
+                continue;
+              }
               tempAudioSourceKeys.push(s3Key);
               mixerSources.push({
                 s3_key: s3Key,
@@ -874,6 +884,16 @@ export const processAudioFn = inngest.createFunction(
                 label,
               });
             }
+          }
+
+          // Every source failed to download (usually a transient proxy/YouTube
+          // issue) — only now do we fail the whole job.
+          if (mixerSources.length === 0) {
+            throw new JobProcessingError(
+              "We couldn't download any of your sources right now. This is " +
+                "usually temporary — please try again in a few minutes.",
+              "all audio sources failed to download",
+            );
           }
 
           result = await runMixer(
