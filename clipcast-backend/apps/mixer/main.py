@@ -82,6 +82,17 @@ image = (
         "ffmpeg", "rubberband-cli", "fluidsynth", "fluid-soundfont-gm"
     )
     .pip_install_from_requirements("requirements.txt")
+    # Installed in a SEPARATE layer so pip resolves them independently of the
+    # pinned ML core — bundling everything blew up the resolver
+    # ("resolution-too-deep"). Lyric transcription + melody re-instrument + the
+    # optional Langfuse monitor.
+    .pip_install(
+        "faster-whisper>=1.0.0",
+        "basic-pitch>=0.3.0",
+        "pretty_midi>=0.2.10",
+        "pyfluidsynth>=1.3.0",
+        "langfuse>=2.0.0",
+    )
     .env({"TORCH_HOME": CACHE, "HF_HOME": CACHE})
     .add_local_python_source("audio_engine", "crew", "music_crew", "monitoring")
 )

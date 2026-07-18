@@ -29,6 +29,10 @@ image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg", "git")
     .pip_install_from_requirements("requirements.txt")
+    # ACE-Step from git in its own layer (torch is already pinned above, so its
+    # heavy deps — diffusers/transformers/spacy/pytorch_lightning — resolve
+    # against a fixed torch instead of exploding pip's resolver).
+    .pip_install("git+https://github.com/ace-step/ACE-Step.git")
     # ACE-Step downloads its weights from HuggingFace on first init; cache them
     # (and any HF assets) in the persisted volume so warm starts are instant.
     .env({"HF_HOME": CACHE, "TORCH_HOME": CACHE})

@@ -9,9 +9,9 @@ torch==2.4.1
 torchaudio==2.4.1
 torchvision==0.19.1
 
-# ACE-Step (Apache-2.0) — installs the `acestep` package + its own pinned deps
-# (diffusers, transformers==4.50.0, pytorch_lightning, spacy, …).
-acestep @ git+https://github.com/ace-step/ACE-Step.git
+# NOTE: ACE-Step (the `acestep` package) is installed from git in a SEPARATE
+# image layer (see main.py) — a `pkg @ git+…` line here isn't resolved by
+# Modal's build mirror, and isolating it keeps pip's resolver from exploding.
 
 # Audio I/O + AWS + web/Modal.
 soundfile>=0.12.1
