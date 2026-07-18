@@ -67,6 +67,10 @@ def load_audio(path: str, sr: int = SAMPLE_RATE) -> tuple[np.ndarray, int]:
 
 def detect_bpm_and_beats(y: np.ndarray, sr: int) -> tuple[float, list[float]]:
     """Global tempo + beat grid (docs/15 step 2)."""
+    # TODO(audio, MUSIC_QUALITY_PROBLEMS P1.5/P1.6): return a true DOWNBEAT grid
+    # (madmom DBNDownBeatTracking / BeatNet) and align parts on bar-ones, and
+    # warp per-bar instead of one global ratio — fixes the "in tempo but slightly
+    # off" feel.
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, trim=False)
     beat_times = librosa.frames_to_time(beat_frames, sr=sr)
     bpm = float(np.atleast_1d(tempo)[0])
@@ -75,6 +79,8 @@ def detect_bpm_and_beats(y: np.ndarray, sr: int) -> tuple[float, list[float]]:
 
 def detect_key(y: np.ndarray, sr: int) -> tuple[str, bool]:
     """Best-fit key via Krumhansl-Schmuckler correlation (docs/15 step 3)."""
+    # TODO(audio, MUSIC_QUALITY_PROBLEMS P1.7): swap the librosa Krumhansl profile
+    # for Essentia KeyExtractor for more reliable harmonic mixing.
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     profile = chroma.mean(axis=1)
     if profile.sum() > 0:
@@ -197,6 +203,9 @@ _GENRE_LANES: dict[str, dict] = {
 }
 
 
+# TODO(audio, MUSIC_QUALITY_PROBLEMS P4.17): expand the lanes/vocabulary — add a
+# real "lofi hip-hop" lane and finer sub-genres (drill, afrobeats, phonk), and
+# let the Director agent choose from them, rather than these fixed heuristics.
 def decide_mix_style(source_profiles: list[dict], user_genre: str | None = None) -> dict:
     """Choose the target production lane before rendering.
 
@@ -625,6 +634,14 @@ def layer_in(base: np.ndarray, extra: np.ndarray | None, level: float) -> np.nda
     return out.astype(np.float32)
 
 
+# TODO(audio, MUSIC_QUALITY_PROBLEMS P0.2): melody re-instrumentation is
+# currently DISABLED — basic-pitch pulls the full TensorFlow and pretty_midi
+# fails its wheel build, which broke the mixer image, so those deps + the
+# fluidsynth apt were removed. Re-add with a lightweight backend:
+#   pip install "basic-pitch[onnxruntime]"   (no TensorFlow)
+#   pretty_midi with --no-build-isolation    (numpy already present)
+# in a separate image layer, then this function starts carrying the tune again
+# (it's already None-safe, so nothing breaks meanwhile).
 def reinstrument_melody(
     stem_path: str, sr: int, genre: str, soundfont: str = SOUNDFONT_PATH
 ) -> np.ndarray | None:

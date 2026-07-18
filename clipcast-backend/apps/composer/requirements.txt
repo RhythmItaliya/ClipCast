@@ -4,10 +4,16 @@
 # here can disturb the mixer's pins — the mixer calls this app remotely and
 # falls back to its deterministic composer if this app is unavailable.
 
-# Torch pinned to match ACE-Step's tested CUDA 12.1 wheels.
-torch==2.4.1
-torchaudio==2.4.1
-torchvision==0.19.1
+# Torch 2.5.1 (not 2.4.1): the diffusers version ACE-Step pulls registers a
+# flash_attn_3 custom op whose signature torch 2.4.1's infer_schema rejects at
+# import ("Parameter q has unsupported type") — which crash-looped the composer.
+# torch >= 2.5 accepts it. Keep torch/torchaudio/torchvision versions in lockstep.
+# TODO(audio): ACE-Step + diffusers + torch is a fragile trio — pin diffusers
+# explicitly here once a known-good (diffusers, torch) pair is confirmed on a
+# deploy, so a future diffusers release can't silently break the image again.
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1
 
 # NOTE: ACE-Step (the `acestep` package) is installed from git in a SEPARATE
 # image layer (see main.py) — a `pkg @ git+…` line here isn't resolved by

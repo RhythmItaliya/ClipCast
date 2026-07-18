@@ -46,6 +46,13 @@ GENRE_PRESETS: dict[str, dict] = {
 # but noticeably cleaner vocals, which is the most audible part of a mashup.
 DEMUCS_MODEL = "htdemucs_ft"
 CACHE = "/cache"
+# Hard cap on how long the mixer waits for the ACE-Step composer app before
+# giving up and using the deterministic composer. Without this bound a
+# crash-looping / cold composer container hangs the ENTIRE mix (observed: a
+# crash-looping composer stalled a job ~25 min). Covers a cold start + model
+# load; if it's genuinely unhealthy the mix still finishes, just without the
+# neural bed.
+NEURAL_BED_TIMEOUT_SEC = 240
 
 
 class AudioSource(BaseModel):
@@ -73,6 +80,9 @@ class ProcessAudioRequest(BaseModel):
     # mixer pick the lane from the sources; any preset overrides it. Same preset
     # vocabulary as the generate genres (see GENRE_PRESETS / decide_mix_style).
     target_genre: str | None = None
+    # TODO(audio, MUSIC_QUALITY_PROBLEMS P0.3): add `instrumental_only: bool` —
+    # when set, force every part's tune_only=True (drop the vocal overlay) so a
+    # user can request a pure instrumental mix. Add a UI toggle on the mix tab.
 
 
 image = (
@@ -311,7 +321,13 @@ class ClipCastMixer:
             import soundfile as sf
 
             composer = modal.Cls.from_name("clipcast-composer", "AceComposer")()
-            wav_bytes = composer.generate.remote(prompt, float(duration_sec), int(seed))
+            # spawn + get(timeout) so a crash-looping / cold composer can NEVER
+            # hang the mix — on timeout we fall through to the deterministic bed.
+            call = composer.generate.spawn(prompt, float(duration_sec), int(seed))
+            wav_bytes = call.get(timeout=NEURAL_BED_TIMEOUT_SEC)
+            # TODO(audio, MUSIC_QUALITY_PROBLEMS P0.1/P1.4): key-lock the neural
+            # bed to the vocal's Camelot key (only tempo is locked below), to fix
+            # the vocal-on-generated-bed harmonic clash — the top quality item.
             y, gsr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
             y = ae._to_stereo(np.asarray(y, dtype=np.float32))
             if gsr != 44100:
@@ -519,8 +535,15 @@ class ClipCastMixer:
         # FluidSynth), computed ONCE per part, both driven by the director's plan.
         # Both degrade to None and the deterministic composer if their model/app
         # is unavailable, so this is additive quality that can never break a render.
+        neural_ok = True  # once the composer is down, don't retry it per part
         for pi, p in enumerate(built):
-            p["neural_bed"] = self._neural_bed(director_prompt, target_bpm, part_sec, seed=1000 + pi)
+            p["neural_bed"] = (
+                self._neural_bed(director_prompt, target_bpm, part_sec, seed=1000 + pi)
+                if neural_ok
+                else None
+            )
+            if neural_ok and p["neural_bed"] is None:
+                neural_ok = False
 
             # Carry the recognisable tune: transcribe the vocal (or the
             # instrumental when the part is tune-only) and replay it in-genre.
@@ -608,6 +631,11 @@ class ClipCastMixer:
         # pass — a producer sending a take back — and keep whichever scores
         # higher. Bounded to one retry; the heavy work (Demucs/warp/ACE-Step) is
         # already cached, so only the cheap FX pass + re-score repeat.
+        # TODO(audio, MUSIC_QUALITY_PROBLEMS P3.13/P3.14): make the redo harder —
+        # on a low score also send work back to the COMPOSER to regenerate the
+        # ACE-Step bed with a new seed/prompt (wire the crew's render-in-the-loop
+        # critic), and optimize Content-Enjoyment too, not just Production
+        # Quality — trying 2-3 arrangement candidates and keeping the best.
         TARGET_PQ = 7.0
         clips = []
         for vi, (name, order, strength, fx) in enumerate(variations, start=1):
