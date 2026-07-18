@@ -83,7 +83,7 @@ image = (
     )
     .pip_install_from_requirements("requirements.txt")
     .env({"TORCH_HOME": CACHE, "HF_HOME": CACHE})
-    .add_local_python_source("audio_engine", "crew", "music_crew")
+    .add_local_python_source("audio_engine", "crew", "music_crew", "monitoring")
 )
 
 app = modal.App("clipcast-mixer", image=image)

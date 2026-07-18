@@ -126,6 +126,38 @@ def test_runs_headless_without_llm():
     print("headless (no LLM) + json log: ok")
 
 
+def test_tracer_receives_events_including_errors():
+    class RecordingTracer:
+        def __init__(self):
+            self.events = []
+
+        def event(self, name, data):
+            self.events.append((name, data))
+
+    class BoomLLM:
+        def complete(self, system, user):
+            if system == "composer":
+                raise RuntimeError("llm down")
+            return json.dumps({"ok": True, "accept": True} if system == "critic" else {"ok": True})
+
+    tracer = RecordingTracer()
+    agents = {
+        "composer": Agent("composer", "composer", fallback=lambda s: {"bed_prompt": "det"}),
+        "critic": Agent("critic", "critic"),
+    }
+    crew = Crew(agents, flow=["composer"], critic_role="critic",
+                execute=lambda s: {"score": 9}, llm=BoomLLM(), max_rounds=1, tracer=tracer)
+    crew.run(ProductionState())
+
+    names = [n for n, _ in tracer.events]
+    assert names[0] == "run_start" and names[-1] == "run_end"
+    assert "execute" in names
+    # The composer's LLM failure is surfaced as an error on its trace event.
+    comp = [d for n, d in tracer.events if n == "decision" and d["role"] == "composer"][0]
+    assert comp["error"] == "llm down"
+    print("tracer events + error surfacing: ok")
+
+
 def test_unknown_role_in_flow_raises():
     try:
         Crew({"a": Agent("a", "a")}, flow=["a", "ghost"], critic_role="a",
@@ -142,5 +174,6 @@ if __name__ == "__main__":
     test_critic_reroute_loops_back()
     test_agent_falls_back_when_llm_fails()
     test_runs_headless_without_llm()
+    test_tracer_receives_events_including_errors()
     test_unknown_role_in_flow_raises()
     print("\nAll crew framework tests passed.")

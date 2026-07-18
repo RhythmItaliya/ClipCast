@@ -32,6 +32,23 @@ class LLM(Protocol):
     def complete(self, system: str, user: str) -> str: ...
 
 
+@runtime_checkable
+class Tracer(Protocol):
+    """Observability sink for a crew run — every decision, retry, and failure is
+    emitted here so a monitoring tool (Langfuse, see `crew/monitoring.py`) can
+    visualise the agents' work. `event` must never raise."""
+
+    def event(self, name: str, data: dict) -> None: ...
+
+
+class _NoopTracer:
+    def event(self, name: str, data: dict) -> None:  # noqa: D401
+        pass
+
+
+NOOP_TRACER: Tracer = _NoopTracer()
+
+
 def parse_json(raw: str):
     """Parse a JSON object from an LLM reply, tolerating ```json fences."""
     text = (raw or "").strip()
@@ -182,6 +199,7 @@ class Crew:
         execute: Callable[[ProductionState], object],
         llm: LLM | None = None,
         max_rounds: int = 3,
+        tracer: Tracer | None = None,
     ) -> None:
         missing = [r for r in flow + [critic_role] if r not in agents]
         if missing:
@@ -192,13 +210,32 @@ class Crew:
         self.execute = execute
         self.llm = llm
         self.max_rounds = max(1, max_rounds)
+        self.tracer = tracer or NOOP_TRACER
+
+    def _trace(self, name: str, decision: Decision, round_: int) -> None:
+        # A fallback decision means the agent's LLM failed — surface it as an
+        # error in the monitoring tool, not a silent success.
+        self.tracer.event(
+            name,
+            {
+                "round": round_,
+                "role": decision.role,
+                "to": decision.to_role,
+                "choices": decision.choices,
+                "rationale": decision.rationale,
+                "error": decision.note if decision.rationale == "fallback" else None,
+            },
+        )
 
     def run(self, state: ProductionState) -> tuple[object, ProductionLog]:
         log = ProductionLog()
         result: object = None
         reroute_from: str | None = None
+        accepted = False
+        self.tracer.event("run_start", {"flow": self.flow, "max_rounds": self.max_rounds})
         for round_ in range(1, self.max_rounds + 1):
-            # A reroute re-enters the flow at the addressed role, not the top.
+            # A reroute re-enters the flow at the addressed role, not the top —
+            # a critic sending work back re-does only that role onward.
             active = self.flow
             if reroute_from in self.flow:
                 active = self.flow[self.flow.index(reroute_from):]
@@ -206,16 +243,22 @@ class Crew:
                 decision = self.agents[role].decide(state, self.llm)
                 state.record(decision)
                 log.append(round_, decision)
+                self._trace("decision", decision, round_)
 
             result = self.execute(state)
             state.analysis["take"] = _summarize(result)
+            self.tracer.event("execute", {"round": round_, "take": state.analysis["take"]})
 
             verdict = self.agents[self.critic_role].decide(state, self.llm)
             state.record(verdict)
             log.append(round_, verdict)
-            if verdict.choices.get("accept") or round_ == self.max_rounds:
+            self._trace("critic", verdict, round_)
+            accepted = bool(verdict.choices.get("accept"))
+            if accepted or round_ == self.max_rounds:
                 break
+            # Rejected → redo, like a studio sending a take back for another pass.
             reroute_from = verdict.to_role or self.flow[0]
+        self.tracer.event("run_end", {"rounds": round_, "accepted": accepted})
         return result, log
 
 

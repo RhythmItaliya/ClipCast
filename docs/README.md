@@ -46,6 +46,11 @@ billing & credits (07), admin panel (08), deployment (09). Each ends with a
   material emotionally, hand work to each other, revise in a bounded Modal loop,
   and leave a visible decision trail (the "Production Room" observability view).
   Everything dynamic — no hardcoded colors/moods — with mock-LLM CPU tests.
+- [18-agent-monitoring.md](18-agent-monitoring.md) — **watching the crew + where
+  compute runs (all free)**: the built-in Production Room, the optional Langfuse
+  (free OSS) trace dashboard via its no-PC cloud tier, and why every heavy task
+  runs on Modal (serverless, scale-to-zero, one app per task) so your PC stays
+  light — plus free-GPU alternatives and why Modal is the best fit.
 
 ## Diagrams
 - [diagrams/](diagrams/README.md) — the formal set (use case, architecture,

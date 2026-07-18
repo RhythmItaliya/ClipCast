@@ -33,18 +33,21 @@ def _fallback_rgb(state: ProductionState) -> dict:
     return {"r": int(fb[0]), "g": int(fb[1]), "b": int(fb[2])}
 
 
-def build_clip_crew(llm) -> Crew:
+def build_clip_crew(llm, tracer=None) -> Crew:
     agents = {
         "colorist": Agent("colorist", COLORIST, fallback=_fallback_rgb),
         "critic": Agent("critic", CRITIC, fallback=lambda s: {"accept": True}),
     }
+    # max_rounds=2: the critic can bounce a low-contrast color back to the
+    # colorist for one retry (redo until readable).
     return Crew(
         agents,
         flow=["colorist"],
         critic_role="critic",
         execute=lambda state: {"planned": True},
         llm=llm,
-        max_rounds=1,
+        max_rounds=2,
+        tracer=tracer,
     )
 
 
@@ -58,8 +61,10 @@ def _clamp(v, default: int) -> int:
 def plan_clip_presentation(llm, ctx: dict) -> tuple[dict, list]:
     """Run the clip crew for one clip. `ctx` carries {title, category,
     transcript, fallback_rgb}. Returns ({'rgb': [r,g,b]}, production_log)."""
+    from monitoring import make_tracer
+
     state = ProductionState(brief=ctx, analysis={})
-    _result, log = build_clip_crew(llm).run(state)
+    _result, log = build_clip_crew(llm, tracer=make_tracer("clipcast-clip-crew")).run(state)
     col = state.decisions.get("colorist", {})
     fb = ctx.get("fallback_rgb") or list(DEFAULT_RGB)
     rgb = [_clamp(col.get("r"), fb[0]), _clamp(col.get("g"), fb[1]), _clamp(col.get("b"), fb[2])]

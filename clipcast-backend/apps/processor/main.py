@@ -301,7 +301,7 @@ image = (
     # Caption ASS generation lives in its own module so the render-test
     # harness (scripts/render_caption_test.py) can exercise the exact
     # production code on a cheap CPU container.
-    .add_local_python_source("captions", "crew", "clip_crew")
+    .add_local_python_source("captions", "crew", "clip_crew", "monitoring")
 )
 
 app = modal.App("clipcast", image=image)

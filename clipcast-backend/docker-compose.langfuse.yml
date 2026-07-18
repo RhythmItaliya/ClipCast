@@ -1,0 +1,36 @@
+# Free, open-source (MIT) agent-monitoring dashboard for the production crew.
+# Langfuse v2 = one server + Postgres. See docs/18-agent-monitoring.md.
+#
+#   docker compose -f clipcast-backend/docker-compose.langfuse.yml up -d
+#   open http://localhost:3001   (create a project → copy its API keys)
+#
+# The app UI runs on :3000, so Langfuse is on :3001 to avoid a clash.
+services:
+  langfuse-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_db:/var/lib/postgresql/data
+
+  langfuse:
+    image: langfuse/langfuse:2
+    restart: unless-stopped
+    depends_on:
+      - langfuse-db
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3001
+      # Local-dev secrets — replace for anything shared:
+      #   openssl rand -base64 32
+      NEXTAUTH_SECRET: change-me-dev-secret
+      SALT: change-me-dev-salt
+      TELEMETRY_ENABLED: "false"
+
+volumes:
+  langfuse_db:

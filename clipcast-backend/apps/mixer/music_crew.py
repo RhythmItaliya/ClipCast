@@ -50,7 +50,7 @@ def _bed_prompt(brief: dict) -> str:
     )
 
 
-def build_music_crew(llm) -> Crew:
+def build_music_crew(llm, tracer=None) -> Crew:
     agents = {
         "lyricist": Agent(
             "lyricist", LYRICIST,
@@ -75,24 +75,28 @@ def build_music_crew(llm) -> Crew:
         ),
         "critic": Agent("critic", CRITIC, fallback=lambda s: {"accept": True}),
     }
-    # Phase 2 is a planning crew (max_rounds=1): the agents decide, the existing
-    # mixer pipeline renders + rates. The render-in-the-loop critic is a later
-    # refinement; the framework already supports it (docs/17 §5).
+    # Planning crew: the agents decide, the mixer pipeline renders + Audiobox-
+    # rates. max_rounds=2 lets the critic send an incoherent plan back for one
+    # revision (a studio redoing a take). The heavier render-in-the-loop critic
+    # is a later refinement; the framework already supports it (docs/17 §5).
     return Crew(
         agents,
         flow=["lyricist", "director", "composer", "engineer"],
         critic_role="critic",
         execute=lambda state: {"planned": True},
         llm=llm,
-        max_rounds=1,
+        max_rounds=2,
+        tracer=tracer,
     )
 
 
 def music_plan(llm, brief: dict) -> tuple[dict, list]:
     """Run the crew and distil its decisions into the plan the mixer consumes,
     plus the ProductionLog JSON. Never raises — falls back per-agent."""
+    from monitoring import make_tracer
+
     state = ProductionState(brief=brief, analysis={"bpm": brief.get("target_bpm")})
-    _result, log = build_music_crew(llm).run(state)
+    _result, log = build_music_crew(llm, tracer=make_tracer("clipcast-music-crew")).run(state)
     d = state.decisions
     mellow = _mellow(brief.get("genre", ""))
     plan = {

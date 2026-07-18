@@ -1,5 +1,6 @@
 """ClipCast multi-agent production crew (docs/17)."""
 from .agents import (
+    NOOP_TRACER,
     Agent,
     Crew,
     Decision,
@@ -7,6 +8,7 @@ from .agents import (
     LogEntry,
     ProductionLog,
     ProductionState,
+    Tracer,
     parse_json,
 )
 
@@ -16,7 +18,9 @@ __all__ = [
     "Decision",
     "LLM",
     "LogEntry",
+    "NOOP_TRACER",
     "ProductionLog",
     "ProductionState",
+    "Tracer",
     "parse_json",
 ]

@@ -202,6 +202,12 @@ The `ProductionLog` is persisted per job and surfaced as a **Production Room**:
 5. **Polish** — live crew indicator, "Auto colorist" settings option, docs.
    Partial: caption auto-color is already the default; the explicit settings
    toggle + live streaming indicator remain.
+6. **Monitoring** — **✅ Built**: a `Tracer` hook on the crew emits every
+   decision, retry round, and agent failure; `crew/monitoring.py` maps it to
+   **Langfuse** (free/OSS) when `LANGFUSE_*` keys are set, else no-ops. Both
+   crews now run with `max_rounds=2` so the critic can reject a take and redo it
+   (like a studio). See [18](18-agent-monitoring.md) for setup + where compute
+   runs (all on Modal, nothing heavy on your PC).
 
 ## 11. Risks & guardrails
 
