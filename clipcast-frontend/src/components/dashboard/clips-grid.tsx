@@ -55,18 +55,23 @@ export function ClipsGrid({
   page = 1,
   pageSize = 8,
   total = 0,
+  basePath = "/dashboard/clips",
+  emptyState,
 }: {
   groups: ClipGroup[];
   youtubeConnected?: boolean;
   page?: number;
   pageSize?: number;
   total?: number;
+  /** Where the pagination Prev/Next navigate (clips vs audio outputs). */
+  basePath?: string;
+  emptyState?: React.ReactNode;
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   return (
     <section className="space-y-6">
       {groups.length === 0 ? (
-        <EmptyState />
+        (emptyState ?? <EmptyState />)
       ) : (
         <>
           <div className="space-y-4">
@@ -78,7 +83,12 @@ export function ClipsGrid({
               />
             ))}
           </div>
-          <Pagination page={page} totalPages={totalPages} total={total} />
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            total={total}
+            basePath={basePath}
+          />
         </>
       )}
     </section>
@@ -89,14 +99,16 @@ function Pagination({
   page,
   totalPages,
   total,
+  basePath,
 }: {
   page: number;
   totalPages: number;
   total: number;
+  basePath: string;
 }) {
   const router = useRouter();
   if (totalPages <= 1) return null;
-  const go = (p: number) => router.push(`/dashboard/clips?page=${p}`);
+  const go = (p: number) => router.push(`${basePath}?page=${p}`);
   return (
     <div className="flex items-center justify-between gap-3">
       <p className="text-muted-foreground text-xs">
