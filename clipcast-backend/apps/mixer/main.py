@@ -573,27 +573,53 @@ class ClipCastMixer:
         )
 
         reference_wav = bed_pick.get("source_wav") or vocal_pick.get("source_wav")
-        clips = []
-        for vi, (name, order, strength, fx) in enumerate(variations, start=1):
+
+        # Render + master + rate ONE take. The score comes from Meta's
+        # Audiobox-Aesthetics (a specialist open model built to judge audio
+        # quality) — never a homemade metric.
+        def _make_take(vi: int, tag: str, strength: str, fx: str) -> dict:
             parts = [_render_part(built[idx], strength, fx) for idx in order]
             edit = ae.sequence_parts(parts, sr, target_total, overlap_sec=overlap_sec)
-            wav_p, mp3_p = base_dir / f"v{vi}.wav", base_dir / f"v{vi}.mp3"
-
-            # Reference-master to the source's own recording; fall back to loudnorm.
-            raw_p = base_dir / f"v{vi}_raw.wav"
+            wav_p = base_dir / f"v{vi}{tag}.wav"
+            raw_p = base_dir / f"v{vi}{tag}_raw.wav"
             ae.write_wav(edit, sr, str(raw_p))
             mastered = bool(reference_wav) and ae.reference_master(str(raw_p), reference_wav, str(wav_p))
-            master_mode = "matchering" if mastered else "loudnorm"
             if not mastered:
                 ae.write_wav(ae.normalize_loudness(edit, sr), sr, str(wav_p))
-            mixed_dur = edit.shape[0] / sr  # mastering preserves length
-
             scores = self._rate(str(wav_p))
+            return {
+                "wav_p": wav_p,
+                "scores": scores,
+                "pq": scores.get("PQ") if scores else None,
+                "master_mode": "matchering" if mastered else "loudnorm",
+                "mixed_dur": edit.shape[0] / sr,
+                "fx": fx,
+            }
+
+        # If Audiobox rates a take below target, redo it once with a cleaner FX
+        # pass — a producer sending a take back — and keep whichever scores
+        # higher. Bounded to one retry; the heavy work (Demucs/warp/ACE-Step) is
+        # already cached, so only the cheap FX pass + re-score repeat.
+        TARGET_PQ = 7.0
+        clips = []
+        for vi, (name, order, strength, fx) in enumerate(variations, start=1):
+            take = _make_take(vi, "", strength, fx)
+            redone = False
+            if take["pq"] is not None and take["pq"] < TARGET_PQ and fx != "clean":
+                redone = True
+                alt = _make_take(vi, "_alt", strength, "clean")
+                if (alt["pq"] or 0.0) > (take["pq"] or 0.0):
+                    take = alt
+
+            wav_p, scores = take["wav_p"], take["scores"]
+            master_mode, mixed_dur = take["master_mode"], take["mixed_dur"]
+            mp3_p = base_dir / f"v{vi}.mp3"
             ae.encode_mp3(str(wav_p), str(mp3_p))
             wav_key, mp3_key = f"{req.out_prefix}v{vi}_master.wav", f"{req.out_prefix}v{vi}_master.mp3"
             _upload_to_s3(wav_p, wav_key, "audio/wav")
             _upload_to_s3(mp3_p, mp3_key, "audio/mpeg")
             pq_txt = f"{scores['PQ']:.1f}/10" if scores and "PQ" in scores else "n/a"
+            fx_txt = f"{take['fx']} (redone)" if redone else fx
             order_txt = " × ".join(part_metas[idx]["label"] for idx in order)
             clips.append(
                 {
@@ -606,7 +632,7 @@ class ClipCastMixer:
                         f"composer kit {ae.style_to_kit(style_label)} "
                         f"(+neural {'on' if neural_on else 'off'}, "
                         f"+melody {'on' if melody_on else 'off'}) ({strength}) · "
-                        f"FX {fx} · master {master_mode} · parts {parts_txt} · "
+                        f"FX {fx_txt} · master {master_mode} · parts {parts_txt} · "
                         f"style {style_label} ({target_bpm:.0f} BPM) · "
                         f"director {plan['note']} · "
                         f"length {mixed_dur:.1f}s ({length_mode}) · Audiobox PQ {pq_txt}"
