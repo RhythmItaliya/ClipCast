@@ -140,6 +140,14 @@ cat <<'BANNER'
     Stripe   : forwarding webhooks (if CLI installed)
     Backend  : Modal cloud (already deployed) —
                ALL heavy GPU/AI work runs there, never locally.
+
+  Crew debug / observability (see how the AI agents decided each job):
+    Admin    : http://localhost:3000/admin/jobs   (click "Inspect" on a job:
+               who/what/why per step, real model vs fallback, errors)
+    User view: http://localhost:3000/dashboard/production/<jobId>
+    Langfuse : http://localhost:3001  (only if you ran
+               docker-compose.langfuse.yml; else use the free cloud.langfuse.com)
+
   Press Ctrl+C to stop everything.
 ──────────────────────────────────────────────
 
