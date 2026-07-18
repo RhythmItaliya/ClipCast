@@ -66,6 +66,13 @@ def plan_clip_presentation(llm, ctx: dict) -> tuple[dict, list]:
     state = ProductionState(brief=ctx, analysis={})
     _result, log = build_clip_crew(llm, tracer=make_tracer("clipcast-clip-crew")).run(state)
     col = state.decisions.get("colorist", {})
+    # Some model replies nest the color one level deeper (e.g.
+    # {"colorist": {"r":..}}); unwrap so we use the RGB instead of falling back.
+    if isinstance(col, dict) and "r" not in col:
+        for value in col.values():
+            if isinstance(value, dict) and "r" in value:
+                col = value
+                break
     fb = ctx.get("fallback_rgb") or list(DEFAULT_RGB)
     rgb = [_clamp(col.get("r"), fb[0]), _clamp(col.get("g"), fb[1]), _clamp(col.get("b"), fb[2])]
     return {"rgb": rgb}, log.to_json()
