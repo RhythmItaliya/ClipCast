@@ -36,8 +36,18 @@ REQUIRED_KEYS = [
     "S3_BUCKET_NAME",
 ]
 # Optional keys — included only if set. YT_DLP_PROXY is a residential proxy URL
-# that enables the (best-effort) YouTube-URL download path.
-OPTIONAL_KEYS = ["YT_DLP_PROXY"]
+# that enables the (best-effort) YouTube-URL download path. DEEPSEEK_API_KEY and
+# ANTHROPIC_API_KEY enable the DeepSeek / Claude LLM providers for the AI crew
+# (Gemini above is the always-required baseline); LANGFUSE_* enable the optional
+# agent-trace dashboard (docs/18).
+OPTIONAL_KEYS = [
+    "YT_DLP_PROXY",
+    "DEEPSEEK_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LANGFUSE_HOST",
+]
 
 
 def main() -> int:
