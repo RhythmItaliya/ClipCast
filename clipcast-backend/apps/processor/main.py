@@ -18,6 +18,7 @@ from captions import (
     build_caption_subs,
     parse_hex_color,
 )
+from clip_crew import plan_clip_presentation
 
 try:
     import ffmpegcv
@@ -230,6 +231,24 @@ def _category_highlight_hex(category):
             return hex_color
     return None
 
+
+def _rgb_to_hex(rgb):
+    """[r, g, b] → '#RRGGBB'."""
+    r, g, b = (max(0, min(255, int(v))) for v in rgb)
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+
+def _clip_transcript_snippet(transcript_segments, start, end, max_chars=400):
+    """The words spoken inside a clip's window — context for the Colorist to
+    read the clip's emotion from."""
+    words = [
+        s.get("word", "")
+        for s in transcript_segments
+        if s.get("start") is not None and s.get("end") is not None
+        and s["end"] > start and s["start"] < end
+    ]
+    return " ".join(w for w in words if w).strip()[:max_chars]
+
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.0-devel-ubuntu22.04", add_python="3.11")
     .apt_install([
@@ -282,7 +301,7 @@ image = (
     # Caption ASS generation lives in its own module so the render-test
     # harness (scripts/render_caption_test.py) can exercise the exact
     # production code on a cheap CPU container.
-    .add_local_python_source("captions")
+    .add_local_python_source("captions", "crew", "clip_crew")
 )
 
 app = modal.App("clipcast", image=image)
@@ -815,6 +834,22 @@ class ClipCast:
         self.gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         print("Created gemini client...")
 
+    def _gemini_llm(self):
+        """Wrap the Gemini client in the crew's LLM protocol (or None so a crew
+        runs headless on deterministic fallbacks)."""
+        client = getattr(self, "gemini_client", None)
+        if client is None:
+            return None
+
+        class _GeminiLLM:
+            def complete(self, system: str, user: str) -> str:
+                resp = client.models.generate_content(
+                    model="gemini-2.5-flash", contents=f"{system}\n\n{user}"
+                )
+                return resp.text or ""
+
+        return _GeminiLLM()
+
     def _get_hf_fallback(self):
         """Lazily load the HF fallback model on first use only.
 
@@ -1250,6 +1285,7 @@ class ClipCast:
         clips_rendered = 0
         clip_records = []
         clip_errors = []
+        production_log = []  # the clip crew's decision transcript (docs/17 §6)
         for index, moment in enumerate(valid_moments):
             print(f"Processing clip {index} ({'PREVIEW' if request.preview_only else 'FULL'}) "
                   f"from {moment['start']} to {moment['end']}")
@@ -1261,11 +1297,26 @@ class ClipCast:
                         watermark_text=request.watermark_text,
                     )
                 else:
-                    # User's own color wins; otherwise auto-theme the highlight
-                    # by the clip's mood/category (None → brand default).
-                    effective_caption_color = request.caption_color or _category_highlight_hex(
-                        moment.get("category")
-                    )
+                    # User's own color always wins. Otherwise the Colorist agent
+                    # (docs/17 §3b) decides the highlight RGB dynamically from the
+                    # clip's emotion; the category map is only its fallback.
+                    if request.caption_color:
+                        effective_caption_color = request.caption_color
+                    else:
+                        fallback_hex = _category_highlight_hex(moment.get("category")) or "#6366F1"
+                        pres, clip_log = plan_clip_presentation(
+                            self._gemini_llm(),
+                            {
+                                "title": moment["title"],
+                                "category": moment.get("category"),
+                                "transcript": _clip_transcript_snippet(
+                                    transcript_segments, moment["start"], moment["end"]
+                                ),
+                                "fallback_rgb": list(parse_hex_color(fallback_hex)),
+                            },
+                        )
+                        effective_caption_color = _rgb_to_hex(pres["rgb"])
+                        production_log.extend({**e, "clip": index} for e in clip_log)
                     record = process_clip(
                         base_dir, video_path, request.s3_key,
                         moment["start"], moment["end"], index, transcript_segments, moment["title"],
@@ -1328,6 +1379,7 @@ class ClipCast:
             "clips_rendered": clips_rendered,
             "clips": clip_records,
             "processing_summary": processing_summary,
+            "production_log": production_log,
             **({"clip_warnings": clip_errors} if clip_errors else {}),
         }
 

@@ -18,3 +18,4 @@ export type {
   ClipAppearance,
 } from "./settings";
 export type { AdminUser, AdminJob, AdminClip } from "./admin";
+export type { ProductionLog, ProductionLogEntry } from "./production";

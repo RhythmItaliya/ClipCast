@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clapperboard,
   Clock,
   Download,
   ExternalLink,
@@ -16,6 +17,7 @@ import {
   Video,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
@@ -174,7 +176,18 @@ function VideoGroupSection({
       </button>
 
       {open && (
-        <div className="border-border grid grid-cols-2 gap-4 border-t p-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div className="border-border border-t px-5 pt-3">
+          <Link
+            href={`/dashboard/production/${group.id}`}
+            className="text-muted-foreground hover:text-brand inline-flex items-center gap-1.5 text-xs font-medium"
+          >
+            <Clapperboard className="size-3.5" /> Production Room — see how the AI
+            crew decided this
+          </Link>
+        </div>
+      )}
+      {open && (
+        <div className="grid grid-cols-2 gap-4 p-5 pt-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {group.clips.map((clip, i) => (
             <ClipCard
               key={clip.id}

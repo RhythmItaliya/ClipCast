@@ -1,4 +1,5 @@
 import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { Prisma } from "@prisma/client";
 import { env } from "~/env";
 import { inngest } from "./client";
 import { creditsForAudio, creditsForDuration } from "~/lib/credits";
@@ -346,6 +347,7 @@ export const processVideoFn = inngest.createFunction(
           clips_rendered?: number;
           clip_warnings?: string[];
           processing_summary?: string;
+          production_log?: unknown[];
           clips?: {
             s3_key: string;
             thumbnail_s3_key?: string;
@@ -387,6 +389,10 @@ export const processVideoFn = inngest.createFunction(
             data: {
               duration: Math.round(exactDuration),
               processingSummary: modalData.processing_summary ?? null,
+              // The clip crew's decision transcript (docs/17) for this job.
+              productionLog: (modalData.production_log ?? undefined) as
+                | Prisma.InputJsonValue
+                | undefined,
             },
           });
           return {
@@ -993,6 +999,9 @@ export const processAudioFn = inngest.createFunction(
             status: "processed",
             duration: result.duration ? Math.round(result.duration) : null,
             processingSummary: result.processing_summary ?? null,
+            productionLog: (result.production_log ?? undefined) as
+              | Prisma.InputJsonValue
+              | undefined,
             errorMessage: null,
             internalErrorDetail: null,
           },
@@ -1374,6 +1383,8 @@ type AudioMixerResult = {
   wav_s3_key?: string;
   title?: string;
   processing_summary?: string;
+  // The music crew's decision transcript (docs/17 §6).
+  production_log?: unknown[];
   // Mashups return several variations; older single-result callers still get
   // the top-level s3_key (= the first clip).
   clips?: AudioMixerClip[];

@@ -187,9 +187,21 @@ The `ProductionLog` is persisted per job and surfaced as a **Production Room**:
    (Currently a planning crew, `max_rounds=1`; the render-in-the-loop critic is
    a later refinement — the framework already supports it, §5.)
 3. **Clip crew** — Story Editor/Writer/**Colorist**/Director/Critic; dynamic
-   caption RGB replaces the hardcoded map.
+   caption RGB replaces the hardcoded map. **✅ Built**
+   (`apps/processor/clip_crew.py`): the **Colorist** decides the caption
+   highlight RGB per clip from its emotion (transcript snippet + category), the
+   category map is only its fallback, and a job-level `production_log` is
+   returned. CPU-tested in `apps/processor/test_clip_crew.py`.
 4. **Observability** — persist + stream the log; the Production Room UI.
+   **✅ Built (persist + view)**: `UploadedFile.productionLog Json?`; both
+   inngest functions write it; `getProductionLog` server action; the
+   **Production Room** page (`/dashboard/production/[id]`) renders the crew's
+   transcript round-by-round with role handoffs, rationales, and a live RGB
+   swatch for the Colorist's pick; linked from each clip group. (Live *streaming*
+   of the log during a run is the remaining piece.)
 5. **Polish** — live crew indicator, "Auto colorist" settings option, docs.
+   Partial: caption auto-color is already the default; the explicit settings
+   toggle + live streaming indicator remain.
 
 ## 11. Risks & guardrails
 

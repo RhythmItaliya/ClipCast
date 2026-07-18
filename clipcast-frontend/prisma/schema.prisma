@@ -219,6 +219,10 @@ model UploadedFile {
   // chunk(s) (moments), HF fallback Qwen/Qwen2.5-7B-Instruct 1/9 · TalkNet
   // ASD (speaker detection)"). Built in clipcast-backend/apps/processor.
   processingSummary   String?
+  // The multi-agent production crew's decision transcript (docs/17): an ordered
+  // list of {round, from, to, choices, rationale, note} entries rendered in the
+  // "Production Room". Null for jobs that ran before the crew existed.
+  productionLog       Json?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
