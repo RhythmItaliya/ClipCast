@@ -6,6 +6,9 @@ export type QueueFile = {
   s3Key: string;
   filename: string;
   youtubeUrl: string | null;
+  /** Every YouTube source URL (an audio mashup has 2+); each opens in its own
+   * tab from the queue row. Empty for uploaded-file jobs. */
+  sourceUrls: string[];
   status: string;
   clipMode: string | null;
   isPreview: boolean | null;
