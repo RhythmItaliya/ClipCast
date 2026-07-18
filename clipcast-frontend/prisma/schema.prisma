@@ -282,3 +282,11 @@ model VerificationToken {
 
   @@unique([identifier, token])
 }
+
+/// Global admin-managed key/value settings (e.g. the active LLM provider for
+/// the AI crew). One row per key; read on job submission, edited in admin.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

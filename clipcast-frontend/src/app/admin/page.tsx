@@ -9,11 +9,20 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { getAdminRevenueStats, getAdminStats } from "~/actions/admin";
+import {
+  getAdminRevenueStats,
+  getAdminStats,
+  getLlmProviderSetting,
+} from "~/actions/admin";
+import { AiProviderSetting } from "~/components/admin/ai-provider-setting";
 import { formatCents } from "~/lib/utils";
 
 export default async function AdminOverviewPage() {
-  const [stats, revenue] = await Promise.all([getAdminStats(), getAdminRevenueStats()]);
+  const [stats, revenue, llmProvider] = await Promise.all([
+    getAdminStats(),
+    getAdminRevenueStats(),
+    getLlmProviderSetting(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -24,6 +33,8 @@ export default async function AdminOverviewPage() {
           Live snapshot of all users, jobs, and clips on ClipCast.
         </p>
       </div>
+
+      <AiProviderSetting current={llmProvider} />
 
       {/* Stat grid */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">

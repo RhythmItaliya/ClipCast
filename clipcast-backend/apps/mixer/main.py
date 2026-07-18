@@ -80,6 +80,9 @@ class ProcessAudioRequest(BaseModel):
     # mixer pick the lane from the sources; any preset overrides it. Same preset
     # vocabulary as the generate genres (see GENRE_PRESETS / decide_mix_style).
     target_genre: str | None = None
+    # Which LLM drives the AI crew: "deepseek" (default) | "gemini" | "claude".
+    # Set from the admin AI-provider setting and passed per job (live switch).
+    llm_provider: str | None = None
     # TODO(audio, MUSIC_QUALITY_PROBLEMS P0.3): add `instrumental_only: bool` —
     # when set, force every part's tune_only=True (drop the vocal overlay) so a
     # user can request a pure instrumental mix. Add a UI toggle on the mix tab.
@@ -99,7 +102,9 @@ image = (
     # lightweight (ONNX) basic-pitch backend.
     .pip_install("faster-whisper>=1.0.0", "langfuse>=2.0.0")
     .env({"TORCH_HOME": CACHE, "HF_HOME": CACHE})
-    .add_local_python_source("audio_engine", "crew", "music_crew", "monitoring")
+    .add_local_python_source(
+        "audio_engine", "crew", "music_crew", "monitoring", "llm_providers"
+    )
 )
 
 app = modal.App("clipcast-mixer", image=image)
@@ -256,25 +261,18 @@ class ClipCastMixer:
             print(f"lyric transcription failed: {e}")
             return ""
 
-    def _gemini_llm(self):
-        """Wrap the warm Gemini client in the crew's LLM protocol (or None so
-        the crew runs headless on deterministic fallbacks)."""
-        client = getattr(self, "gemini", None)
-        if client is None:
-            return None
+    def _make_llm(self, provider=None):
+        """Build the crew LLM for the chosen provider (deepseek/gemini/claude),
+        passing the warm Gemini client for the gemini path. Falls back across
+        configured providers; None → the crew runs on deterministic fallbacks."""
+        from llm_providers import make_llm
 
-        class _GeminiLLM:
-            name = "gemini-2.5-flash"  # shown in the admin observability log
+        return make_llm(provider, getattr(self, "gemini", None))
 
-            def complete(self, system: str, user: str) -> str:
-                resp = client.models.generate_content(
-                    model="gemini-2.5-flash", contents=f"{system}\n\n{user}"
-                )
-                return resp.text or ""
-
-        return _GeminiLLM()
-
-    def _producer_plan(self, lyrics: str, genre: str, target_bpm: float, key_name: str, quality: str):
+    def _producer_plan(
+        self, lyrics: str, genre: str, target_bpm: float, key_name: str,
+        quality: str, provider: str | None = None,
+    ):
         """Run the music crew (docs/17 §3a): lyricist → director → composer →
         engineer produce the plan the render consumes, plus the ProductionLog.
         Returns (plan, production_log). Never raises — agents fall back."""
@@ -288,7 +286,7 @@ class ClipCastMixer:
             "lyrics": (lyrics or "")[:1500],
         }
         try:
-            return music_plan(self._gemini_llm(), brief)
+            return music_plan(self._make_llm(provider), brief)
         except Exception as e:  # noqa: BLE001
             print(f"music crew failed, using deterministic plan: {e}")
             mellow = (genre or "").split()[0] in {"lofi", "ambient", "cinematic"}
@@ -527,7 +525,8 @@ class ClipCastMixer:
         lead_quality = "minor" if built[0]["is_minor"] else "major"
         lyrics = self._transcribe_lyrics(str(vocal_pick["vocals"]))
         plan, production_log = self._producer_plan(
-            lyrics, style_label, target_bpm, lead_key, lead_quality
+            lyrics, style_label, target_bpm, lead_key, lead_quality,
+            provider=req.llm_provider,
         )
         director_prompt = plan["bed_prompt"]
 

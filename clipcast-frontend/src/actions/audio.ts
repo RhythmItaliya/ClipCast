@@ -9,6 +9,7 @@ import { creditsForAudio } from "~/lib/credits";
 import { auth } from "~/server/auth";
 import { checkConcurrencyLimit } from "~/server/concurrency";
 import { db } from "~/server/db";
+import { getLlmProvider } from "~/server/settings";
 import { checkUsageLimits } from "~/server/usage";
 import type { ActionResult } from "~/types";
 
@@ -232,6 +233,7 @@ export async function createAdvancedMix(
     transformStrength,
     remixDurationSeconds: clampedDuration,
     targetGenre,
+    llmProvider: await getLlmProvider(),
     // Legacy fields keep older queue/mixer code paths usable.
     vocalUrl: youtubeSources[0]?.url,
     bedUrl: youtubeSources[1]?.url,
@@ -316,6 +318,7 @@ export async function createGeneratedTrack(
     audioMode: "generate",
     prompt: prompt.trim(),
     genre: genre ?? null,
+    llmProvider: await getLlmProvider(),
   });
   return sent
     ? { success: true }

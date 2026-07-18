@@ -5,6 +5,7 @@ import { inngest } from "~/inngest/client";
 import { auth } from "~/server/auth";
 import { checkConcurrencyLimit } from "~/server/concurrency";
 import { db } from "~/server/db";
+import { getLlmProvider } from "~/server/settings";
 import { checkUsageLimits } from "~/server/usage";
 import type { ActionResult } from "~/types";
 
@@ -94,6 +95,7 @@ export async function processVideo(
     userId: uploadedVideo.userId,
     clipMode,
     previewOnly,
+    llmProvider: await getLlmProvider(),
   });
 
   // No revalidatePath: the dashboard reads queue/credits from the shared
@@ -161,6 +163,7 @@ export async function processYoutubeVideo(
     youtubeUrl,
     clipMode,
     previewOnly,
+    llmProvider: await getLlmProvider(),
   });
 
   return sent

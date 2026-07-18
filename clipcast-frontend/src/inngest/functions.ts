@@ -102,6 +102,8 @@ export const processVideoFn = inngest.createFunction(
     const clipMode = (event.data as { clipMode?: string }).clipMode ?? "qa";
     const previewOnly =
       (event.data as { previewOnly?: boolean }).previewOnly ?? false;
+    const llmProvider =
+      (event.data as { llmProvider?: string }).llmProvider ?? "deepseek";
 
     try {
       const { userId, credits, s3Key, captionColor, watermarkText } =
@@ -325,6 +327,8 @@ export const processVideoFn = inngest.createFunction(
             // watermark burned at all).
             caption_color: captionColor,
             watermark_text: watermarkText,
+            // AI-crew provider (Colorist etc.) — admin-selected, defaults deepseek.
+            llm_provider: llmProvider ?? "deepseek",
           }),
           headers: {
             "Content-Type": "application/json",
@@ -670,6 +674,7 @@ export const processAudioFn = inngest.createFunction(
       transformStrength,
       remixDurationSeconds,
       targetGenre,
+      llmProvider,
       genre,
       prompt,
     } = event.data as {
@@ -683,6 +688,7 @@ export const processAudioFn = inngest.createFunction(
       transformStrength?: "auto" | "clean" | "subtle" | "transformed" | "max";
       remixDurationSeconds?: number;
       targetGenre?: string;
+      llmProvider?: string;
       genre?: string;
       prompt?: string;
     };
@@ -878,6 +884,7 @@ export const processAudioFn = inngest.createFunction(
               transform_strength: transformStrength ?? "auto",
               remix_duration_seconds: remixDurationSeconds ?? 0,
               target_genre: targetGenre ?? "auto",
+              llm_provider: llmProvider ?? "deepseek",
             },
             "mix",
           );
@@ -902,6 +909,7 @@ export const processAudioFn = inngest.createFunction(
               transform_strength: "auto",
               remix_duration_seconds: remixDurationSeconds ?? 0,
               target_genre: targetGenre ?? "auto",
+              llm_provider: llmProvider ?? "deepseek",
             },
             "mix",
           );
@@ -914,6 +922,7 @@ export const processAudioFn = inngest.createFunction(
             prompt: prompt ?? null,
             genre: genre ?? null,
             duration_seconds: 20,
+            llm_provider: llmProvider ?? "deepseek",
           },
           "gen",
         );

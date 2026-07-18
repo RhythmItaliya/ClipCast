@@ -3,6 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
+import {
+  LLM_PROVIDERS,
+  getLlmProvider,
+  setLlmProviderSetting,
+  type LlmProvider,
+} from "~/server/settings";
 
 // ── Guard helper — throws if the caller is not an ADMIN ─────────────────────
 async function requireAdmin() {
@@ -26,6 +32,29 @@ async function logAdminAction(
       data: { adminId: admin.id, adminEmail: admin.email, action, targetType, targetId, detail },
     })
     .catch((err) => console.warn("[admin audit] failed to log", err));
+}
+
+// ── AI provider setting ───────────────────────────────────────────────────────
+
+/** The active LLM provider for the AI crew (admin-only read). */
+export async function getLlmProviderSetting(): Promise<LlmProvider> {
+  await requireAdmin();
+  return getLlmProvider();
+}
+
+/** Switch the AI crew's LLM provider (deepseek/gemini/claude). Live — the next
+ * job picks it up; no redeploy. */
+export async function setLlmProvider(
+  provider: LlmProvider,
+): Promise<{ success: boolean; error?: string }> {
+  const admin = await requireAdmin();
+  if (!LLM_PROVIDERS.includes(provider)) {
+    return { success: false, error: "Invalid provider." };
+  }
+  await setLlmProviderSetting(provider);
+  await logAdminAction(admin, "set_llm_provider", "setting", "llm_provider", provider);
+  revalidatePath("/admin");
+  return { success: true };
 }
 
 // ── Stats ────────────────────────────────────────────────────────────────────
