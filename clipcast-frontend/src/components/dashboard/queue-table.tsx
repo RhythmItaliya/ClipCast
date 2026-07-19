@@ -311,11 +311,17 @@ const QueueRow = memo(function QueueRow({
   const showError =
     (item.status === "failed" || item.status === "no credits") &&
     !!item.errorMessage;
-  const detail = showError
-    ? item.errorMessage
-    : [item.isPreview ? "Preview · 480p" : null, item.clipMode]
-        .filter(Boolean)
-        .join(" · ");
+  // Audio and clip jobs describe themselves differently — an audio job must
+  // NEVER show a clip mode like "qa"/"highlights".
+  const modeLabel =
+    item.jobType === "audio"
+      ? item.audioMode === "generate"
+        ? "Composed track"
+        : "AI mix"
+      : [item.isPreview ? "Preview · 480p" : null, item.clipMode]
+          .filter(Boolean)
+          .join(" · ");
+  const detail = showError ? item.errorMessage : modeLabel;
 
   return (
     <tr className="hover:bg-background/40">

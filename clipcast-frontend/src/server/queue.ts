@@ -15,6 +15,10 @@ export const QUEUE_FILE_SELECT = {
   bedYoutubeUrl: true,
   audioSources: true,
   status: true,
+  // jobType + audioMode so the row shows the AUDIO mode for audio jobs instead
+  // of the clip-mode default ("qa").
+  jobType: true,
+  audioMode: true,
   clipMode: true,
   isPreview: true,
   errorMessage: true,
@@ -62,6 +66,8 @@ export function toQueueFile(file: QueueFileRow): QueueFile {
     filename: file.displayName ?? "Unknown filename",
     youtubeUrl: file.youtubeUrl,
     sourceUrls: extractSourceUrls(file),
+    jobType: file.jobType ?? "clip",
+    audioMode: file.audioMode ?? null,
     status: file.status,
     clipMode: file.clipMode,
     isPreview: file.isPreview,

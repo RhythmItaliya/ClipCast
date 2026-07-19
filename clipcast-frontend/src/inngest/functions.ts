@@ -106,7 +106,7 @@ export const processVideoFn = inngest.createFunction(
       (event.data as { llmProvider?: string }).llmProvider ?? "deepseek";
 
     try {
-      const { userId, credits, s3Key, captionColor, watermarkText } =
+      const { userId, credits, s3Key, captionColor, watermarkText, jobType } =
         await step.run("check-credits", async () => {
           const uploadedFile = await db.uploadedFile.findUniqueOrThrow({
             where: { id: uploadedFileId },
@@ -120,6 +120,7 @@ export const processVideoFn = inngest.createFunction(
                 },
               },
               s3Key: true,
+              jobType: true,
             },
           });
           return {
@@ -128,8 +129,19 @@ export const processVideoFn = inngest.createFunction(
             s3Key: uploadedFile.s3Key,
             captionColor: uploadedFile.user.captionColor,
             watermarkText: uploadedFile.user.watermarkText,
+            jobType: uploadedFile.jobType,
           };
         });
+
+      // Validation: the clip pipeline must never run an audio job (and the
+      // audio pipeline never a clip job — mirrored in processAudioFn). Guards
+      // against any mis-routed event so the two pipelines stay fully separate.
+      if (jobType === "audio") {
+        throw new JobProcessingError(
+          "This is an audio job and can't be processed as a clip. Please retry it from the queue.",
+          `process-video received audio job ${uploadedFileId}`,
+        );
+      }
 
       // Inngest memoizes completed steps: on replay (which happens after
       // every step.sleep/step.fetch below), this callback is NOT re-invoked,
@@ -803,13 +815,22 @@ export const processAudioFn = inngest.createFunction(
       const mixSourceCount =
         audioMode === "mashup" ? (sourceCount ?? sources?.length ?? 2) : 0;
       const requiredCredits = creditsForAudio(audioMode, mixSourceCount);
-      const { credits } = await step.run("check-credits-audio", async () => {
+      const { credits, jobType } = await step.run("check-credits-audio", async () => {
         const file = await db.uploadedFile.findUniqueOrThrow({
           where: { id: uploadedFileId },
-          select: { user: { select: { credits: true } } },
+          select: { jobType: true, user: { select: { credits: true } } },
         });
-        return { credits: file.user.credits };
+        return { credits: file.user.credits, jobType: file.jobType };
       });
+
+      // Validation mirror of processVideoFn: the audio pipeline must never run a
+      // clip job, keeping the two fully separate.
+      if (jobType && jobType !== "audio") {
+        throw new JobProcessingError(
+          "This is a clip job and can't be processed as audio. Please retry it from the queue.",
+          `process-audio received clip job ${uploadedFileId}`,
+        );
+      }
 
       if (credits < requiredCredits) {
         await step.run("set-status-no-credits-audio", async () => {

@@ -215,6 +215,9 @@ export async function createAdvancedMix(
       displayName: `AI mix (${sources.length} source${sources.length === 1 ? "" : "s"})`,
       jobType: "audio",
       audioMode: "mashup",
+      // Audio jobs are NOT clip jobs — null out the clip-mode default ("qa") so
+      // it can never leak into the audio UI.
+      clipMode: null,
       audioGenre: targetGenre !== "auto" ? targetGenre : null,
       youtubeUrl: youtubeSources[0]?.url ?? null,
       bedYoutubeUrl: youtubeSources[1]?.url ?? null,
@@ -305,6 +308,7 @@ export async function createGeneratedTrack(
       displayName: prompt.trim().slice(0, 80) || `${genre ?? "Generated"} track`,
       jobType: "audio",
       audioMode: "generate",
+      clipMode: null, // not a clip job — never show a clip mode
       audioPrompt: prompt.trim() || null,
       audioGenre: genre ?? null,
       uploaded: true,
