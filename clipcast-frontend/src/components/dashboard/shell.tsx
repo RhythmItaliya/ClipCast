@@ -47,22 +47,22 @@ const nav = [
     description: "Turn long-form podcasts into share-ready clips.",
   },
   {
-    title: "Clips",
+    title: "Clips Studio",
     to: "/dashboard/clips",
     icon: Scissors,
-    description: "All clips grouped by source video.",
-  },
-  {
-    title: "Queue",
-    to: "/dashboard/queue",
-    icon: ListChecks,
-    description: "Processing jobs across your workspace.",
+    description: "Your video clips, grouped by source.",
   },
   {
     title: "Audio Studio",
     to: "/dashboard/audio",
     icon: Sparkles,
     description: "Generate music or mash up two songs into a beat-matched mix.",
+  },
+  {
+    title: "Queue",
+    to: "/dashboard/queue",
+    icon: ListChecks,
+    description: "Processing jobs across your workspace.",
   },
   {
     title: "YouTube",
