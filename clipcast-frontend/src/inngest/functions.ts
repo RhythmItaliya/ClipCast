@@ -719,7 +719,12 @@ export const processAudioFn = inngest.createFunction(
       youtubeUrl: string,
       s3Key: string,
       prefix: string,
-    ): Promise<number> {
+    ): Promise<{
+      duration: number;
+      title?: string | null;
+      uploader?: string | null;
+      heatmap?: unknown[] | null;
+    }> {
       // Audio jobs only need the audio track — bestaudio is far faster/smaller
       // than the full up-to-4K video download the clip pipeline uses.
       const submitted = await step.run(`${prefix}-submit`, () =>
@@ -752,9 +757,12 @@ export const processAudioFn = inngest.createFunction(
             `Download failed (HTTP ${poll.httpStatus}): ${poll.body.slice(0, 600)}`,
           );
         }
-        return poll.data.duration && poll.data.duration > 0
-          ? poll.data.duration
-          : 0;
+        return {
+          duration: poll.data.duration && poll.data.duration > 0 ? poll.data.duration : 0,
+          title: poll.data.title ?? null,
+          uploader: poll.data.uploader ?? null,
+          heatmap: poll.data.heatmap ?? null,
+        };
       }
       throw new JobProcessingError(
         "This is taking longer than expected. One of the videos may be too " +
@@ -872,8 +880,9 @@ export const processAudioFn = inngest.createFunction(
                 );
               }
               const s3Key = `${outPrefix}source_${index + 1}.m4a`;
+              let meta: Awaited<ReturnType<typeof downloadToS3>>;
               try {
-                await downloadToS3(source.url, s3Key, prefix);
+                meta = await downloadToS3(source.url, s3Key, prefix);
               } catch (err) {
                 // One flaky source shouldn't kill a multi-source mix — skip it
                 // and mix the rest (we fail only if NONE download, below).
@@ -888,6 +897,11 @@ export const processAudioFn = inngest.createFunction(
                 s3_key: s3Key,
                 role: source.role ?? "auto",
                 label,
+                // Song Research metadata (docs/19) for this source.
+                title: meta.title ?? null,
+                uploader: meta.uploader ?? null,
+                duration: meta.duration || undefined,
+                heatmap: meta.heatmap ?? null,
               });
             } else {
               if (!source.s3Key) {
@@ -1369,6 +1383,10 @@ type CloudDownloaderResponse = {
   detail?: string;
   s3_key?: string;
   source_bytes?: number;
+  // Song Research (docs/19): captured from yt-dlp's info JSON.
+  title?: string | null;
+  uploader?: string | null;
+  heatmap?: unknown[] | null;
 };
 
 type AudioEventSource = {
@@ -1383,6 +1401,11 @@ type AudioMixerSource = {
   s3_key: string;
   role?: "auto" | "vocal" | "bed" | "extra";
   label?: string;
+  // Song Research (docs/19) metadata for real-lyric lookup + viral hook.
+  title?: string | null;
+  uploader?: string | null;
+  duration?: number;
+  heatmap?: unknown[] | null;
 };
 
 async function postCloudDownloader(payload: {

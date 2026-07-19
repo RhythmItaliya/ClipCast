@@ -191,14 +191,41 @@ def _run_yt_dlp(
             "--merge-output-format", "mp4",
             "--remux-video", "mp4",
         ]
-    command += ["-o", str(output_template), url]
+    # Also write the info JSON so the caller can read the "most replayed"
+    # heatmap + title/uploader for the Song Research step (docs/19). Best-effort:
+    # if it's absent the pipeline falls back to energy-based hook detection.
+    command += ["--write-info-json", "-o", str(output_template), url]
     return subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+
+
+def _read_source_metadata(base_dir: pathlib.Path) -> dict:
+    """Pull title / uploader / the most-replayed heatmap out of yt-dlp's
+    info JSON. Returns {} on any problem — this is enrichment, never required."""
+    import json
+
+    infos = list(base_dir.glob("source.info.json"))
+    if not infos:
+        return {}
+    try:
+        info = json.loads(infos[0].read_text())
+    except Exception:  # noqa: BLE001
+        return {}
+    heatmap = info.get("heatmap")
+    return {
+        "title": info.get("title"),
+        "uploader": info.get("uploader") or info.get("channel"),
+        # list of {start_time, end_time, value}; the mixer picks the hottest run.
+        "heatmap": heatmap if isinstance(heatmap, list) else None,
+    }
 
 
 def _finished_files(base_dir: pathlib.Path) -> list[pathlib.Path]:
     return [
         path for path in base_dir.glob("source.*")
+        # Exclude yt-dlp's sidecars — partials and the info JSON (docs/19) — so
+        # only the real media file is considered the download.
         if path.suffix not in {".part", ".ytdl"}
+        and not path.name.endswith(".info.json")
     ]
 
 
@@ -336,6 +363,9 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str, audio_only: boo
             "s3_key": s3_key,
             "duration": duration,
             "source_bytes": source_path.stat().st_size,
+            # Song Research (docs/19): title/uploader + most-replayed heatmap for
+            # real-lyrics lookup + viral-moment hook selection. Best-effort.
+            **_read_source_metadata(base_dir),
         }
     finally:
         shutil.rmtree(base_dir, ignore_errors=True)

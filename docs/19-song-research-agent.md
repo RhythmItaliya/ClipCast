@@ -1,10 +1,15 @@
 # ClipCast 19: the Song Research (A&R) step
 
-> **Status: plan / spec.** A new step at the FRONT of the audio pipeline that
+> **Status: BUILT (2026-07-19).** A step at the FRONT of the audio pipeline that
 > researches a song before mixing it — identify it, pull its **real online
-> lyrics**, find its **viral moment**, understand it line-by-line, then produce.
-> Companion to [17](17-multi-agent-production-crew.md) (the crew) and
-> [16](16-ai-arrangement-and-audio-rating.md) (the mixer). Nothing built yet.
+> lyrics**, find its **viral moment**, feed both to the crew, then produce.
+> Downloader captures the heatmap/title (`_read_source_metadata`); the mixer runs
+> `research.py` (`identify_song` / `fetch_lyrics` / `pick_viral_window`),
+> feeds the real lyrics to the director and the viral window to the hook picker,
+> and records `research …` in the processing summary. Fallback-first; CPU-tested
+> in `apps/mixer/test_research.py`. Companion to
+> [17](17-multi-agent-production-crew.md) (the crew) and
+> [16](16-ai-arrangement-and-audio-rating.md) (the mixer).
 
 ## 1. Why
 Today the mixer transcribes the vocal with Whisper — which mishears words — and

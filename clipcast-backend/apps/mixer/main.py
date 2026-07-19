@@ -59,6 +59,12 @@ class AudioSource(BaseModel):
     s3_key: str
     role: str = "auto"  # "auto" | "vocal" | "bed" | "extra"
     label: str | None = None
+    # Song Research (docs/19): metadata captured by the downloader for real-lyric
+    # lookup + viral-moment hook selection. All optional / best-effort.
+    title: str | None = None
+    uploader: str | None = None
+    duration: float | None = None
+    heatmap: list | None = None
 
 
 class ProcessAudioRequest(BaseModel):
@@ -103,7 +109,8 @@ image = (
     .pip_install("faster-whisper>=1.0.0", "langfuse>=2.0.0")
     .env({"TORCH_HOME": CACHE, "HF_HOME": CACHE})
     .add_local_python_source(
-        "audio_engine", "crew", "music_crew", "monitoring", "llm_providers"
+        "audio_engine", "crew", "music_crew", "monitoring", "llm_providers",
+        "research",
     )
 )
 
@@ -460,6 +467,14 @@ class ClipCastMixer:
                     "vocals": vocals,
                     "instrumental": instrumental,
                     "source_wav": str(wav),  # original recording → mastering reference
+                    # Song Research metadata (docs/19) for this source.
+                    "meta": {
+                        "title": source.title,
+                        "uploader": source.uploader,
+                        "duration": source.duration,
+                        "heatmap": source.heatmap,
+                        "label": source.label,
+                    },
                     "balance": balance,
                     "bed_analysis": bed_analysis,
                     "profile": {
@@ -504,31 +519,60 @@ class ClipCastMixer:
         )
         length_mode = "user" if req.remix_duration_seconds else "auto"
 
+        # 4b. SONG RESEARCH (docs/19): fetch the vocal source's REAL lyrics
+        # (LRCLIB → lyrics.ovh → Whisper) and its viral moment from the YouTube
+        # heatmap. Real lyrics feed the director; the viral window seeds the hook
+        # (falling back to energy-based detection when there's no heatmap).
+        import research as song_research
+
+        whisper_lyrics = self._transcribe_lyrics(str(vocal_pick["vocals"]))
+        research_bundle = song_research.research_source(
+            vocal_pick.get("meta", {}),
+            whisper_lyrics,
+            window_sec=part_sec,
+            clip_end=(vocal_pick.get("meta") or {}).get("duration"),
+        )
+        lyrics = research_bundle["lyrics"]
+        viral = research_bundle["viral_window"]
+        vocal_hook = (viral["start"], viral["end"]) if viral else None
+
         if vocal_pick["idx"] != bed_pick["idx"]:
-            part_specs = [(vocal_pick, None), (bed_pick, None)]
+            part_specs = [(vocal_pick, vocal_hook), (bed_pick, None)]
         else:
             solo = vocal_pick
             solo_voc, _ = sf.read(str(solo["vocals"]), dtype="float32")
             solo_inst, _ = sf.read(str(solo["instrumental"]), dtype="float32")
             solo_mono = ae._to_stereo(solo_voc).mean(axis=1) + ae._to_stereo(solo_inst).mean(axis=1)
             hooks = ae.detect_hook(solo_mono, sr, window_sec=part_sec, n=2)
-            part_specs = [(solo, hooks[0]), (solo, hooks[1] if len(hooks) > 1 else hooks[0])]
+            part_specs = [
+                (solo, vocal_hook or hooks[0]),
+                (solo, hooks[1] if len(hooks) > 1 else hooks[0]),
+            ]
 
         built = [self._build_part(item, sr, part_sec, target_bpm, ref_analysis, hook) for item, hook in part_specs]
         part_metas = [p["meta"] for p in built]
         style_label = style_plan["style"]
 
-        # AI Music Director: read the vocal's lyrics + emotion, then plan the
-        # genre transform (mood + a genre instrumental prompt for ACE-Step).
-        # Degrades to a deterministic genre plan if Whisper/Gemini are absent.
+        # AI Music Director: read the REAL lyrics (from Song Research above) +
+        # emotion, then plan the genre transform. `lyrics` is already the best
+        # available (LRCLIB / lyrics.ovh / Whisper). Degrades to a deterministic
+        # plan if Gemini/DeepSeek/Claude are absent.
         lead_key = ae._PITCHES[built[0]["key_root"] % 12]
         lead_quality = "minor" if built[0]["is_minor"] else "major"
-        lyrics = self._transcribe_lyrics(str(vocal_pick["vocals"]))
         plan, production_log = self._producer_plan(
             lyrics, style_label, target_bpm, lead_key, lead_quality,
             provider=req.llm_provider,
         )
         director_prompt = plan["bed_prompt"]
+        research_note = (
+            f"lyrics {research_bundle['lyrics_source'] or 'none'} · "
+            f"viral {research_bundle['viral_source']}"
+            + (
+                f" {viral['start']:.0f}-{viral['end']:.0f}s"
+                if viral
+                else ""
+            )
+        )
 
         # Neural genre bed (ACE-Step) + melody re-instrumentation (basic-pitch →
         # FluidSynth), computed ONCE per part, both driven by the director's plan.
@@ -669,7 +713,7 @@ class ClipCastMixer:
                         f"+melody {'on' if melody_on else 'off'}) ({strength}) · "
                         f"FX {fx_txt} · master {master_mode} · parts {parts_txt} · "
                         f"style {style_label} ({target_bpm:.0f} BPM) · "
-                        f"director {plan['note']} · "
+                        f"director {plan['note']} · research {research_note} · "
                         f"length {mixed_dur:.1f}s ({length_mode}) · Audiobox PQ {pq_txt}"
                     ),
                 }
