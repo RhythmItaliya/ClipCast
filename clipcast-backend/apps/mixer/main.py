@@ -603,7 +603,18 @@ class ClipCastMixer:
         # composer + vocal overlay + FX + sequence, so 3 distinct edits are near
         # free. When the user forced a beat-originality strength we honour it and
         # only vary order + FX; on Auto we also vary the production intensity.
-        if req.transform_strength == "auto":
+        forced_genre = bool(req.target_genre and req.target_genre.lower() != "auto")
+        if forced_genre:
+            # The user asked for a SPECIFIC genre — commit to it fully. No diluted
+            # "Chill"/"Clean" take that weakens the genre; every variation is the
+            # requested genre at a genre-committing strength (user's beat
+            # originality if they set one, else transformed/max).
+            strong = req.transform_strength if req.transform_strength != "auto" else "transformed"
+            variations = [
+                ("Remix", (0, 1), strong, "viral"),
+                ("Flip", (1, 0), "max", "viral"),
+            ]
+        elif req.transform_strength == "auto":
             variations = [
                 ("Remix", (0, 1), style_plan["transform_strength"], "viral"),
                 ("Flip", (1, 0), "max", "viral"),
@@ -684,7 +695,14 @@ class ClipCastMixer:
         for vi, (name, order, strength, fx) in enumerate(variations, start=1):
             take = _make_take(vi, "", strength, fx)
             redone = False
-            if take["pq"] is not None and take["pq"] < TARGET_PQ and fx != "clean":
+            # ...but a user-forced genre keeps its committed take rather than a
+            # cleaner/diluted redo.
+            if (
+                take["pq"] is not None
+                and take["pq"] < TARGET_PQ
+                and fx != "clean"
+                and not forced_genre
+            ):
                 redone = True
                 alt = _make_take(vi, "_alt", strength, "clean")
                 if (alt["pq"] or 0.0) > (take["pq"] or 0.0):
