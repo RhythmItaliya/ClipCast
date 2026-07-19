@@ -56,6 +56,7 @@ export function ClipsGrid({
   pageSize = 8,
   total = 0,
   basePath = "/dashboard/clips",
+  pageParam = "page",
   emptyState,
 }: {
   groups: ClipGroup[];
@@ -65,6 +66,8 @@ export function ClipsGrid({
   total?: number;
   /** Where the pagination Prev/Next navigate (clips vs audio outputs). */
   basePath?: string;
+  /** Query param this grid paginates on — lets two grids share one page. */
+  pageParam?: string;
   emptyState?: React.ReactNode;
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -88,6 +91,7 @@ export function ClipsGrid({
             totalPages={totalPages}
             total={total}
             basePath={basePath}
+            pageParam={pageParam}
           />
         </>
       )}
@@ -100,15 +104,17 @@ function Pagination({
   totalPages,
   total,
   basePath,
+  pageParam,
 }: {
   page: number;
   totalPages: number;
   total: number;
   basePath: string;
+  pageParam: string;
 }) {
   const router = useRouter();
   if (totalPages <= 1) return null;
-  const go = (p: number) => router.push(`${basePath}?page=${p}`);
+  const go = (p: number) => router.push(`${basePath}?${pageParam}=${p}`);
   return (
     <div className="flex items-center justify-between gap-3">
       <p className="text-muted-foreground text-xs">
