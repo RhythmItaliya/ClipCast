@@ -52,6 +52,11 @@ billing & credits (07), admin panel (08), deployment (09). Each ends with a
   (free OSS) trace dashboard via its no-PC cloud tier, and why every heavy task
   runs on Modal (serverless, scale-to-zero, one app per task) so your PC stays
   light — plus free-GPU alternatives and why Modal is the best fit.
+- [19-song-research-agent.md](19-song-research-agent.md) — **plan only**: a Song
+  Research (A&R) step that runs before a mix — identify the song, pull its REAL
+  lyrics (LRCLIB, free), find its viral moment (YouTube "most replayed" heatmap
+  via yt-dlp, with energy-hook fallback), understand it, then produce. All
+  fallback-safe + CPU-testable; feeds the existing crew.
 
 ## Diagrams
 - [diagrams/](diagrams/README.md) — the formal set (use case, architecture,
