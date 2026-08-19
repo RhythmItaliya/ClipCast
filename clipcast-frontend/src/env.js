@@ -25,6 +25,10 @@ export const env = createEnv({
     // Optional at app startup so a missing backend URL cannot take down the
     // entire frontend. YouTube jobs report a targeted configuration error.
     DOWNLOAD_VIDEO_ENDPOINT: z.string().url().optional(),
+    // TEMP — local yt-dlp fallback: set to http://localhost:3000/api/local-download
+    // to enable. Remove once Modal downloader is fixed or a residential proxy
+    // is configured. Must never be set to a public URL.
+    LOCAL_DOWNLOAD_ENDPOINT: z.string().url().optional(),
     // Fast, download-free duration lookup used to gate credits before the
     // full download starts. Optional — falls back to the old minimum-credit
     // gate if unset, rather than blocking YouTube jobs entirely.
@@ -81,6 +85,7 @@ export const env = createEnv({
     AUTH_DISCORD_SECRET: process.env.AUTH_DISCORD_SECRET,
     PROCESS_VIDEO_ENDPOINT: process.env.PROCESS_VIDEO_ENDPOINT,
     DOWNLOAD_VIDEO_ENDPOINT: process.env.DOWNLOAD_VIDEO_ENDPOINT,
+    LOCAL_DOWNLOAD_ENDPOINT: process.env.LOCAL_DOWNLOAD_ENDPOINT,
     YOUTUBE_DURATION_ENDPOINT: process.env.YOUTUBE_DURATION_ENDPOINT,
     PROCESS_AUDIO_ENDPOINT: process.env.PROCESS_AUDIO_ENDPOINT,
     PROCESS_VIDEO_ENDPOINT_AUTH: process.env.PROCESS_VIDEO_ENDPOINT_AUTH,
