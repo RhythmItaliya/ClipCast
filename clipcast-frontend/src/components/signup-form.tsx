@@ -66,7 +66,9 @@ export function SignupForm({
     }
     setOauthLoading(provider);
     try {
-      await signIn(provider, { redirectTo: "/post-login" });
+      // OAuth redirects server-side; `/` role-routes on landing
+      // (admins → /admin, else /dashboard).
+      await signIn(provider, { redirectTo: "/" });
     } catch {
       toast.error(FRIENDLY_MESSAGES.network);
       setOauthLoading(null);

@@ -13,7 +13,7 @@ frontend structure (04), uploads & queue (05), the Modal pipeline (06),
 billing & credits (07), admin panel (08), deployment (09). Each ends with a
 "later additions" section covering the newest behavior.
 
-## Full (deep dives, 10-13)
+## Full (deep dives, 10-19)
 - [10-realtime-data-and-state.md](10-realtime-data-and-state.md) — TanStack
   Query architecture: one shared query, structural sharing, selector
   subscriptions, polling policy, why nothing over-renders.
@@ -42,21 +42,24 @@ billing & credits (07), admin panel (08), deployment (09). Each ends with a
   Audiobox-Aesthetics rating loop re-renders and keeps the best-scoring take.
   One warm Modal container; deterministic DSP is unit-tested.
 - [17-multi-agent-production-crew.md](17-multi-agent-production-crew.md) —
-  **plan only**: turn both pipelines into a film-production-style *crew of AI
+  **built**: both pipelines run as a film-production-style *crew of AI
   agents* (director, composer, lyricist, colorist, critic…) that understand the
   material emotionally, hand work to each other, revise in a bounded Modal loop,
   and leave a visible decision trail (the "Production Room" observability view).
-  Everything dynamic — no hardcoded colors/moods — with mock-LLM CPU tests.
+  Everything dynamic — no hardcoded colors/moods — with mock-LLM CPU tests. The
+  crew runs on any of DeepSeek (default), Gemini, or Claude, switchable per job
+  from the admin panel, and always degrades to deterministic fallbacks.
 - [18-agent-monitoring.md](18-agent-monitoring.md) — **watching the crew + where
   compute runs (all free)**: the built-in Production Room, the optional Langfuse
   (free OSS) trace dashboard via its no-PC cloud tier, and why every heavy task
   runs on Modal (serverless, scale-to-zero, one app per task) so your PC stays
   light — plus free-GPU alternatives and why Modal is the best fit.
-- [19-song-research-agent.md](19-song-research-agent.md) — **plan only**: a Song
+- [19-song-research-agent.md](19-song-research-agent.md) — **built**: a Song
   Research (A&R) step that runs before a mix — identify the song, pull its REAL
-  lyrics (LRCLIB, free), find its viral moment (YouTube "most replayed" heatmap
-  via yt-dlp, with energy-hook fallback), understand it, then produce. All
-  fallback-safe + CPU-testable; feeds the existing crew.
+  lyrics (LRCLIB, free; lyrics.ovh fallback), find its viral moment (YouTube
+  "most replayed" heatmap via yt-dlp, with energy-hook fallback), understand it,
+  then produce. All fallback-safe + CPU-testable (`apps/mixer/research.py`,
+  `test_research.py`); feeds the music crew.
 
 ## Diagrams
 - [diagrams/](diagrams/README.md) — the formal set (use case, architecture,

@@ -58,6 +58,7 @@ export function ClipsGrid({
   basePath = "/dashboard/clips",
   pageParam = "page",
   emptyState,
+  
 }: {
   groups: ClipGroup[];
   youtubeConnected?: boolean;

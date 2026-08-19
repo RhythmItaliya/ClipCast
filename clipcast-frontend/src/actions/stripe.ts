@@ -37,6 +37,7 @@ export async function createCheckoutSession(priceId: PriceId) {
     customer: user.stripeCustomerId || undefined,
     client_reference_id: serverSession.user.id,
     mode: "payment",
+    
     success_url: `${env.BASE_URL}/dashboard?success=true`,
   });
 

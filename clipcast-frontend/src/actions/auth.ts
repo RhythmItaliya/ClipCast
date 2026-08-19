@@ -1,6 +1,7 @@
 "use server";
 
 import { hashPassword } from "~/lib/auth";
+import { homePathForRole } from "~/lib/roles";
 import { signupSchema, type SignupFormValues } from "~/schemas/auth";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
@@ -8,6 +9,18 @@ import Stripe from "stripe";
 import { env } from "~/env";
 
 import type { ActionResult, NotificationPref } from "~/types";
+
+/**
+ * Where the just-signed-in user should land — `/admin` for admins, `/dashboard`
+ * for everyone else. Called by the credentials/OTP forms right after a
+ * `redirect: false` sign-in so they can navigate straight to the destination,
+ * with no intermediate landing route to flash through.
+ */
+export async function resolveHomePath(): Promise<string> {
+  const session = await auth();
+  if (!session?.user) return "/login";
+  return homePathForRole(session.user.role);
+}
 
 export async function signUp(data: SignupFormValues): Promise<ActionResult> {
   const validationResult = signupSchema.safeParse(data);

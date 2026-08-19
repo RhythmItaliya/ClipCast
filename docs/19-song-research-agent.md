@@ -95,14 +95,13 @@ admin Production Room shows what was found and which source won.
 heatmap, and lyrics fetch with a mocked `urllib` (LRCLIB hit, miss→fallback,
 all-miss→Whisper). The crew's mock-LLM tests already cover the downstream plan.
 
-## 8. Build phases
-1. **Downloader** — capture + return `heatmap` + `title` + `uploader`.
+## 8. Build phases (all complete ✅)
+1. **Downloader** — capture + return `heatmap` + `title` + `uploader`. ✅
 2. **research.py** — song-ID parse + LRCLIB/lyrics.ovh fetch + viral-window
-   picker, all fallback-safe + CPU-tested.
+   picker, all fallback-safe + CPU-tested (`apps/mixer/test_research.py`). ✅
 3. **Wire-in** — inngest threads heatmap/title per source; mixer runs research,
-   feeds real lyrics to the crew brief and viral_window to hook selection.
-4. **Observability** — surface in summary + ProductionLog.
-5. **Docs** — flip this to "built".
+   feeds real lyrics to the crew brief and viral_window to hook selection. ✅
+4. **Observability** — surfaced in the processing summary + ProductionLog. ✅
 
 ## 9. Risks / notes
 - Lyrics-site catalogs miss remixes/covers/regional tracks → Whisper fallback

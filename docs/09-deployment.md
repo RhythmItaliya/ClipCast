@@ -2,7 +2,7 @@
 
 ## Backend (Modal)
 
-One shared secret, two independently deployable apps.
+One shared secret, four independently deployable apps.
 
 ```bash
 # 1. Push the required env values into the Modal secret "clipcast-secret"
@@ -10,28 +10,35 @@ python clipcast-backend/scripts/setup_modal_secret.py
 # --force to overwrite an existing secret
 
 # 2. Deploy
-clipcast-backend/deploy.sh all          # both apps
-clipcast-backend/deploy.sh processor    # just the GPU worker
-clipcast-backend/deploy.sh downloader   # just the YouTube downloader
+clipcast-backend/deploy.sh all          # all four apps (composer first)
+clipcast-backend/deploy.sh processor    # the clip GPU worker
+clipcast-backend/deploy.sh downloader   # the YouTube downloader
+clipcast-backend/deploy.sh mixer        # the Audio Studio GPU worker
+clipcast-backend/deploy.sh composer     # the ACE-Step music generator
 ```
 
 `setup_modal_secret.py` reads the repo-root `.env` directly (Modal containers
 can't see your local `.env`, so values have to be pushed in explicitly) and
 only forwards the keys the deployed code actually reads:
-`GEMINI_API_KEY`, `PROCESS_VIDEO_ENDPOINT_AUTH`, `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_NAME` (required),
-`YT_DLP_PROXY` (optional).
+`PROCESS_VIDEO_ENDPOINT_AUTH`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+`AWS_REGION`, `S3_BUCKET_NAME` (required), plus at least one LLM provider key —
+`DEEPSEEK_API_KEY` (default), `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY` — and the
+optional `YT_DLP_PROXY` and Langfuse keys (`LANGFUSE_PUBLIC_KEY`,
+`LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`).
 
-Each `modal deploy` prints a public HTTPS endpoint URL. Paste
-the processor's into `PROCESS_VIDEO_ENDPOINT` and the downloader's into
-`DOWNLOAD_VIDEO_ENDPOINT` in `.env`. The Modal **app names are stable**
-(`clipcast`, `clipcast-downloader`), so redeploying updates the existing app in
-place rather than minting a new URL, so you don't need to update these env vars
-again on future deploys, only on first setup.
+Each `modal deploy` prints a public HTTPS endpoint URL. Paste the processor's
+into `PROCESS_VIDEO_ENDPOINT`, the downloader's into `DOWNLOAD_VIDEO_ENDPOINT`,
+and the mixer's into `PROCESS_AUDIO_ENDPOINT` in `.env`. The composer has no
+public endpoint — the mixer calls it by name (`modal.Cls.from_name`), which is
+why `deploy.sh all` deploys it first. The Modal **app names are stable**
+(`clipcast`, `clipcast-downloader`, `clipcast-mixer`, `clipcast-composer`), so
+redeploying updates the existing app in place rather than minting a new URL, so
+you don't need to update these env vars again on future deploys, only on first
+setup.
 
-Redeploy either app independently any time its code changes:
+Redeploy any app independently any time its code changes, e.g.
 `clipcast-backend/apps/processor/deploy.sh` or
-`clipcast-backend/apps/downloader/deploy.sh` directly.
+`clipcast-backend/apps/mixer/deploy.sh` directly.
 
 ### What the deploy scripts actually do
 
@@ -60,9 +67,10 @@ cd "$DIR"
 modal deploy main.py
 ```
 
-`clipcast-backend/deploy.sh` (the top-level one) just dispatches to
-`apps/processor/deploy.sh` and/or `apps/downloader/deploy.sh` based on its
-`all`/`processor`/`downloader` argument.
+`clipcast-backend/deploy.sh` (the top-level one) just dispatches to each app's
+own `deploy.sh` based on its `all`/`processor`/`downloader`/`mixer`/`composer`
+argument. For `all` it deploys the composer first (the mixer looks it up by
+name at runtime), then the mixer, processor, and downloader.
 
 ## Frontend
 
@@ -121,8 +129,10 @@ Modal endpoints.
 
 ## Later additions
 
-- `bash deploy.sh {all|processor|downloader}` from `clipcast-backend/` is
-  the only deploy command needed; Modal keeps stable URLs across deploys.
+- `bash deploy.sh {all|processor|downloader|mixer|composer}` from
+  `clipcast-backend/` is the only deploy command needed; Modal keeps stable URLs
+  across deploys. `./start.sh --deploy` runs `deploy.sh all` before starting the
+  local stack.
 - New downloader web function `get_youtube_duration` → set its URL as
   `YOUTUBE_DURATION_ENDPOINT` in `.env`.
 - Caption styling changes: render frames first with

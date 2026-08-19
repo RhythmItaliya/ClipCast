@@ -2,12 +2,13 @@
 
 ## The credit model
 
-Every `User` has a `credits` integer balance (default 10 on signup; see
-`signUp()` in `src/actions/auth.ts`). One credit = one minute of source video,
-rounded up, minimum 1 credit per job. Direct uploads are gated on an
-estimated/stored duration up front; YouTube jobs true-up the exact charge after
-Modal reports the real duration (see
-[05-uploads-and-queue.md](05-uploads-and-queue.md)).
+Every `User` has a `credits` integer balance (default 20 on signup — the schema
+default; `signUp()` in `src/actions/auth.ts` sets none explicitly). For **clip
+jobs**, one credit = one minute of source video, rounded up, minimum 1 credit
+per job. Direct uploads are gated on an estimated/stored duration up front;
+YouTube jobs true-up the exact charge after Modal reports the real duration (see
+[05-uploads-and-queue.md](05-uploads-and-queue.md)). **Audio Studio jobs** use
+flat per-job pricing instead (see below).
 
 ## Buying credits
 
@@ -160,13 +161,17 @@ jobs, clips, revenue, and an audit trail of what admins have done.
 
 ## Pricing modifiers & the ledger (current rules)
 
-`src/lib/credits.ts` is the single source of truth:
+`src/lib/credits.ts` is the single source of truth. For clip jobs,
 `creditsForDuration(seconds, { clipMode, isPreview })` — 1 credit/min
 rounded up, 1-credit floor even for unknown durations, a 0.05s jitter
 allowance so an exactly-3:00 video never bills as 4 minutes, **x1.5 for
-"All" mode** (it fans out ~5 Gemini passes) and **x0.5 for preview jobs**
-(480p, no speaker detection). Both the upfront gate and the final deduction
-call it; deductions are clamped at a 0 balance.
+"All" mode** (it fans out ~5 LLM passes, one per category) and **x0.5 for
+preview jobs** (480p, no speaker detection). For Audio Studio jobs,
+`creditsForAudio(audioMode, sourceCount)` charges a flat
+`AUDIO_GENERATE_CREDITS` (1) for a generated track or `AUDIO_MASHUP_CREDITS`
+(3) for a mashup, plus 1 per extra source beyond the first two. Both the
+upfront gate and the final deduction call these; deductions are clamped at a 0
+balance.
 
 Every balance change writes a `CreditTransaction` row (signed amount +
 `balanceAfter`): Stripe purchases (inside one `$transaction` with the

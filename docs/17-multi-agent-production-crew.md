@@ -1,16 +1,19 @@
 # ClipCast 17: the Multi-Agent Production Crew
 
-> **Status: design / plan.** This is the "deep think first" architecture for
-> turning ClipCast's audio + clip pipelines into a **film-production-style crew
+> **Status: BUILT.** All six phases below are shipped (see the ✅ markers in
+> §10). This doc is kept as the "deep think first" architecture for
+> ClipCast's audio + clip pipelines running as a **film-production-style crew
 > of AI agents** that understand the material emotionally, hand work to each
 > other, argue/revise in a loop, and leave a visible trail of *why* every
 > creative decision was made. Companion to [14](14-audio-studio-mode.md)–[16](16-ai-arrangement-and-audio-rating.md)
-> (audio) and [13](13-clip-modes-and-ai.md) (clips). Nothing here is built yet.
+> (audio) and [13](13-clip-modes-and-ai.md) (clips). The crew runs on the
+> admin-selected LLM (DeepSeek default / Gemini / Claude) and always degrades to
+> deterministic fallbacks.
 
 ## 1. Why a crew, not a single prompt
 
-Today each pipeline has *one* AI decision point — Gemini picks clip moments (doc
-13); Gemini writes one producer plan for the mixer (doc 16 + the new
+Before the crew, each pipeline had *one* AI decision point — the LLM picks clip
+moments (doc 13); the LLM writes one producer plan for the mixer (doc 16 + the
 `_producer_plan`). That's a single director doing everything in one shot.
 
 A real production has **specialists who pass work down a line and give each

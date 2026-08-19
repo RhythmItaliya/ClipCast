@@ -21,6 +21,7 @@ export function useLazyThumbnails() {
       try {
         setUrls(await getClipThumbnailUrls(clipIds));
       } catch {
+          console.warn("Failed to load clip thumbnails");
         // Non-fatal — leave the cards on their placeholder.
       } finally {
         setLoaded(true);

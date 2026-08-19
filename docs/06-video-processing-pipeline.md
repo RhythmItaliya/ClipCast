@@ -1,7 +1,9 @@
 # ClipCast 06: Video processing pipeline (Modal)
 
-Two independently deployed Modal apps. Full detail lives next to the code;
-this page is the map between them.
+The **clip** pipeline is two of ClipCast's four Modal apps — the downloader and
+the processor. (The other two, the mixer + composer, are the Audio Studio
+pipeline; see docs/14.) Full detail lives next to the code; this page is the map
+between the two clip apps.
 
 - **[`clipcast-backend/apps/downloader/README.md`](../clipcast-backend/apps/downloader/README.md)**:
   CPU app. Takes a YouTube URL, downloads it through rotating free proxies
@@ -9,9 +11,11 @@ this page is the map between them.
   function refreshes the proxy ranking every 15 minutes in the background,
   never in the request path.
 - **[`clipcast-backend/apps/processor/README.md`](../clipcast-backend/apps/processor/README.md)**:
-  GPU (L40S) app. Downloads the S3 source, transcribes with WhisperX, asks
-  Gemini which moments to clip, reframes to 9:16 following the active speaker
-  (TalkNet), burns in captions, uploads clips to S3.
+  GPU (L40S) app. Downloads the S3 source, transcribes with WhisperX, asks **the
+  selected LLM** (DeepSeek default / Gemini / Claude, passed per job as
+  `llm_provider`) which moments to clip and ranks them for virality, reframes to
+  9:16 following the active speaker (TalkNet), lets the **Colorist** crew pick the
+  caption highlight color, burns in captions, uploads clips to S3.
 
 ## Why they're split
 
@@ -95,9 +99,21 @@ class ClipCast:
 
 **Step 4: moment selection, plus an AI title.** One prompt per clip mode
 (write your own rules per mode; this is the actual `qa` prompt, trimmed).
-The prompt asks Gemini for a `title` alongside each `{start, end}`, free,
+The prompt asks the LLM for a `title` alongside each `{start, end}`, free,
 since it's the same call that already picks the moments, no second API call
-needed:
+needed.
+
+> **Provider note.** The code snippets below show the Gemini client for
+> concreteness, but moment selection now runs on whichever provider the job
+> carries (`llm_provider`: DeepSeek by default, Gemini, or Claude — see
+> `apps/processor/llm_providers.py` and docs/13). The prompt and JSON-repair
+> logic are provider-independent; the Hugging Face fallback below still applies
+> to any provider.
+>
+> The prompt also asks for a **`viral_score` (0-100)** and a short **`hook`** per
+> moment. After selection, moments are sorted by `viral_score` and the strongest
+> kept, so when a transcript yields more candidates than the target count the
+> most share-worthy ones survive.
 
 ```python
 CLIP_MODE_PROMPTS = {
@@ -251,10 +267,18 @@ straight into `db.clip.createMany()` (see
 
 ## Captions: karaoke word-highlight, no black box
 
-`create_subtitles_with_ffmpeg()` builds one ASS subtitle event **per word**
-(not per multi-word chunk); each event spans exactly that word's spoken
-duration, with the chunk's text rendered plain white except the
-currently-active word, which is wrapped in a color override tag:
+The caption renderer now lives in `apps/processor/captions.py`. It builds one ASS
+subtitle event **per word** (not per multi-word chunk); each event spans exactly
+that word's spoken duration, with the chunk's text rendered plain white except
+the currently-active word, which is wrapped in a color override tag:
+
+> **The highlight color is chosen dynamically.** The indigo constant below is
+> only the last-resort default. Per clip the precedence is: the user's own
+> `caption_color` (Settings, doc 12) wins if set; otherwise the **Colorist**
+> agent picks an RGB from the clip's emotion (docs/17, `clip_crew.py`), guarded
+> by a contrast critic; if no LLM is reachable it falls back to a category-based
+> map (`CATEGORY_HIGHLIGHT_HEX`) and finally to brand indigo. The Colorist's
+> choice + rationale are recorded in the job's `production_log`.
 
 ```python
 def rgb_to_ass_bgr(r, g, b):
@@ -352,7 +376,9 @@ all this.
 ## Deeper dives
 
 - Clip modes, the All fan-out, the open-ended Any mode, per-clip AI category
-  tags, Gemini/HF fallback: **doc 13**.
+  tags, the selected-LLM/HF fallback chain and viral ranking: **doc 13**.
+- The multi-agent crew driving the Colorist (and the music crew): **doc 17**;
+  the Production Room that renders each job's `production_log`: **doc 18**.
 - Burned captions (word-level pill highlight, font-metrics math, the Modal
   render-test harness) and per-user caption color / watermark: **doc 12**.
 - The downloader app also exposes `get_youtube_duration`, a download-free

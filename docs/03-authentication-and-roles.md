@@ -6,7 +6,8 @@
 
 ## Providers
 
-Three, registered in `authConfig.providers`:
+Four, registered in `authConfig.providers` (the email-OTP one is covered in the
+"Email OTP sign-in" section at the end of this doc):
 
 1. **Credentials**: email + password. `authorize()` looks the user up by
    email, compares the password with `comparePasswords()`

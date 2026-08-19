@@ -25,6 +25,7 @@ double-send.
 |---|---|---|
 | Sign-in code (OTP) | `requestLoginOtp` action | — (auth) |
 | Clips are ready | `notify-clip-ready` step after `set-status-processed` | `notifyClipReady` |
+| Audio track ready | `notify-audio-ready` step in `processAudioFn` | `notifyClipReady` |
 | Job failed | no-clips branch + fatal catch (`notify-job-failed*` steps) | `notifyJobFailed` |
 | Weekly summary | `weeklySummaryScheduler` cron, Mondays 09:00 UTC, users with clips in last 7 days | `notifyWeeklySummary` |
 | Product updates | persisted toggle only — no broadcast feature yet | `notifyProductUpdates` |

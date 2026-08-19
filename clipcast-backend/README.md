@@ -1,6 +1,6 @@
 # ClipCast Modal backend
 
-ClipCast uses two independently deployed [Modal](https://modal.com) apps. Local
+ClipCast uses four independently deployed [Modal](https://modal.com) apps. Local
 development runs only Next.js and Inngest; video downloads and GPU processing
 stay in the cloud — nothing here runs on your machine.
 
@@ -10,37 +10,64 @@ stay in the cloud — nothing here runs on your machine.
 clipcast-backend/
 ├── apps/
 │   ├── processor/             clipcast (L40S GPU) — see apps/processor/README.md
-│   │   ├── main.py
+│   │   ├── main.py            transcribe · moment pick · reframe · captions
+│   │   ├── clip_crew.py       the Colorist crew (docs/17)
+│   │   ├── crew.py            vendored copy of ../../crew/agents.py
+│   │   ├── llm_providers.py   DeepSeek / Gemini / Claude adapters
 │   │   ├── requirements.txt
-│   │   ├── asd/
+│   │   ├── asd/               TalkNet active-speaker detection
 │   │   └── deploy.sh
-│   └── downloader/            clipcast-downloader (CPU) — see apps/downloader/README.md
+│   ├── downloader/            clipcast-downloader (CPU) — see apps/downloader/README.md
+│   │   ├── main.py
+│   │   └── deploy.sh
+│   ├── mixer/                 clipcast-mixer (L40S GPU) — see apps/mixer/README.md
+│   │   ├── main.py            Audio Studio: mashup + AI arrangement (docs/14–16)
+│   │   ├── audio_engine.py    deterministic DSP (beat/key match, transitions)
+│   │   ├── music_crew.py      the music production crew (docs/17)
+│   │   ├── research.py        Song Research / A&R step (docs/19)
+│   │   ├── crew.py            vendored copy of ../../crew/agents.py
+│   │   └── deploy.sh
+│   └── composer/              clipcast-composer (L4 GPU) — ACE-Step music gen
 │       ├── main.py
 │       └── deploy.sh
+├── crew/                      shared multi-agent framework (docs/17), CPU-tested
 ├── scripts/
 │   ├── setup_modal_secret.py  push .env values into Modal secret
 │   └── test_pipeline.py       end-to-end pipeline test
-└── deploy.sh                  deploy one service or both
+└── deploy.sh                  deploy one service or all
 ```
 
 - **[apps/downloader](apps/downloader/README.md)** — receives a YouTube URL,
-  downloads it through rotating free proxies, uploads the source to S3.
+  downloads it through rotating free proxies (or a residential proxy), uploads
+  the source to S3.
 - **[apps/processor](apps/processor/README.md)** — the GPU worker: transcribes,
-  picks clip-worthy moments with Gemini, reframes to 9:16 with active-speaker
-  tracking, burns in captions, uploads clips to S3.
+  picks clip-worthy moments with the selected LLM, reframes to 9:16 with
+  active-speaker tracking, burns in captions, uploads clips to S3.
+- **[apps/mixer](apps/mixer/README.md)** — the Audio Studio GPU worker: runs
+  Song Research, the music crew, stem/beat/key mixing, and the Audiobox-scored
+  redo loop; calls the composer for the instrumental bed.
+- **apps/composer** — the ACE-Step (3.5B) text-to-music model, called by the
+  mixer by name (`modal.Cls.from_name`), so it is deployed first.
 
-The app names are intentionally stable so redeployment updates the existing
-Modal apps and preserves the frontend endpoint URLs.
+The `crew/` package is the framework the music crew and clip crew are built on;
+a synced copy is vendored into each app's image as `crew.py` so the Modal build
+doesn't need the repo root on its path.
+
+The app names (`clipcast`, `clipcast-downloader`, `clipcast-mixer`,
+`clipcast-composer`) are intentionally stable so redeployment updates the
+existing Modal apps and preserves the frontend endpoint URLs.
 
 ## Deployment
 
 ```bash
-# Both services
+# All four services (composer first — the mixer calls it by name)
 ./clipcast-backend/deploy.sh all
 
 # One service only
 ./clipcast-backend/deploy.sh processor
 ./clipcast-backend/deploy.sh downloader
+./clipcast-backend/deploy.sh mixer
+./clipcast-backend/deploy.sh composer
 ```
 
 Each service can also be deployed from its own directory:
@@ -48,6 +75,8 @@ Each service can also be deployed from its own directory:
 ```bash
 ./clipcast-backend/apps/processor/deploy.sh
 ./clipcast-backend/apps/downloader/deploy.sh
+./clipcast-backend/apps/mixer/deploy.sh
+./clipcast-backend/apps/composer/deploy.sh
 ```
 
 Before the first deployment, set up a local virtualenv with the helper-script
@@ -63,18 +92,27 @@ modal token new    # one-time Modal CLI login
 python clipcast-backend/scripts/setup_modal_secret.py
 ```
 
-Required secret values are `GEMINI_API_KEY`, `PROCESS_VIDEO_ENDPOINT_AUTH`,
-`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and
-`S3_BUCKET_NAME`. `YT_DLP_PROXY` is optional but a reliable residential proxy is
-recommended for YouTube.
+Required secret values are `PROCESS_VIDEO_ENDPOINT_AUTH`, `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `S3_BUCKET_NAME`, plus at least one
+LLM provider key — `DEEPSEEK_API_KEY` (the default provider), `GEMINI_API_KEY`,
+or `ANTHROPIC_API_KEY`. Optional: `YT_DLP_PROXY` (a reliable residential proxy is
+recommended for YouTube) and the Langfuse trace keys (`LANGFUSE_PUBLIC_KEY`,
+`LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`) for agent monitoring (docs/18).
+`setup_modal_secret.py` pushes whichever of these are set in the root `.env`.
 
 ## Data flow
 
+Clip jobs (the video pipeline):
+
 1. `clipcast-downloader` receives a YouTube URL, downloads remotely, and uploads
-   the original source directly to S3.
+   the original source directly to S3. (Direct uploads skip this step.)
 2. `clipcast` downloads the S3 object inside Modal, transcribes and renders on
    an L40S GPU, uploads the clips to S3, and removes temporary container files.
 3. The user's computer only runs the frontend and local event orchestration.
+
+Audio Studio jobs (docs/14–16) run the same way on `clipcast-mixer`, which calls
+`clipcast-composer` for the AI instrumental bed and writes the finished MP3/WAV
+master back to S3.
 
 ---
 
@@ -179,7 +217,9 @@ Or set `YT_DLP_PROXY` to a residential proxy URL in `.env` and redeploy.
 The download step must complete before processing starts. Check the S3 key
 printed by the download step exists in your bucket.
 
-**"Gemini API error"**
+**"LLM API error" / provider unreachable**
 
-Re-run `setup_modal_secret.py` to push the latest `GEMINI_API_KEY`, then
-redeploy the processor.
+The pipeline degrades to deterministic fallbacks when no provider is reachable,
+so this is non-fatal — but to fix it, re-run `setup_modal_secret.py` to push the
+latest provider key (`DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY`),
+then redeploy the affected app.

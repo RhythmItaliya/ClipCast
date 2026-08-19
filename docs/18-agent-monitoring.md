@@ -40,10 +40,10 @@ never break a render (every trace call is wrapped).
 | Task | Runs on | Your PC? |
 |------|---------|----------|
 | YouTube/audio download | Modal (`clipcast-downloader`, CPU) | no |
-| Clip pipeline (WhisperX, TalkNet, ffmpeg) | Modal (`clipcast-processor`, GPU) | no |
-| Audio mixer (Demucs, Whisper, FX, master) | Modal (`clipcast-mixer`, GPU) | no |
-| Neural bed (ACE-Step) | Modal (`clipcast-composer`, GPU) | no |
-| Agent LLM calls (Gemini) | Google's API | no |
+| Clip pipeline (WhisperX, TalkNet, ffmpeg) | Modal (`clipcast`, L40S GPU) | no |
+| Audio mixer (Demucs, Whisper, FX, master) | Modal (`clipcast-mixer`, L40S GPU) | no |
+| Neural bed (ACE-Step) | Modal (`clipcast-composer`, L4 GPU) | no |
+| Agent LLM calls (DeepSeek / Gemini / Claude) | the provider's API | no |
 | Agent monitoring (Langfuse) | Langfuse Cloud (free) | no |
 | Next.js app + `db push` + CPU crew tests | **your PC** | yes (light) |
 

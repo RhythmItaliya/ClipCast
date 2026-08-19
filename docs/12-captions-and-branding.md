@@ -48,10 +48,14 @@ Never ship caption styling changes without looking at these frames.
 
 ## Per-user branding
 
-- `User.captionColor` (`#RRGGBB`, null = brand indigo #6366F1) and
-  `User.watermarkText` (null/empty = **no watermark at all** — nothing is
-  hardcoded), edited in Settings → Clip appearance (8 swatches + text input,
-  `updateClipAppearance` action).
+- `User.captionColor` (`#RRGGBB`) and `User.watermarkText` (null/empty =
+  **no watermark at all** — nothing is hardcoded), edited in Settings → Clip
+  appearance (8 swatches + text input, `updateClipAppearance` action).
+- **Highlight-color precedence** when `captionColor` is null: the **Colorist**
+  agent picks an RGB per clip from its emotion (docs/17, `clip_crew.py`), guarded
+  by a contrast critic; with no LLM it falls back to a category-based map and
+  finally to brand indigo (#6366F1). A user's own `captionColor` always wins over
+  the Colorist.
 - Flow: Inngest reads both in the `check-credits` step → Modal request body
   (`caption_color`, `watermark_text`) → `ProcessVideoRequest` →
   `process_clip`/`create_preview_clip`. Watermark renders via a drawtext

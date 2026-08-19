@@ -4,6 +4,7 @@ import { Loader2, Mail, X } from "lucide-react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { resolveHomePath } from "~/actions/auth";
 import { requestLoginOtp } from "~/actions/otp";
 import { AuthInput } from "~/components/auth-ui";
 import { FRIENDLY_MESSAGES, getFriendlyErrorMessage, isOffline } from "~/lib/errors";
@@ -72,9 +73,9 @@ export function OtpLoginModal() {
       if (result?.error) {
         setError("Incorrect or expired code. Please try again.");
       } else {
-        // /post-login checks role server-side and sends admins to /admin,
-        // everyone else to /dashboard — same as the password sign-in path.
-        router.push("/post-login");
+        // Straight to the right home, resolved server-side (admin → /admin,
+        // else /dashboard) — same as the password sign-in path.
+        router.push(await resolveHomePath());
       }
     } catch {
       setError(FRIENDLY_MESSAGES.network);

@@ -4,8 +4,10 @@
 > in `apps/mixer` (+ the isolated `apps/composer` ACE-Step app). The current
 > system goes well beyond this original plan:
 > - **AI Music Director crew** (docs/17): lyricist → director → composer →
->   engineer decide the genre transform from the lyric's emotion; Gemini with
->   deterministic fallbacks. Every decision is logged.
+>   engineer decide the genre transform from the lyric's emotion; runs on the
+>   admin-selected LLM (DeepSeek default / Gemini / Claude) with deterministic
+>   fallbacks. Every decision is logged. ("Gemini" further down is just one
+>   example provider.)
 > - **ACE-Step neural genre bed** (`apps/composer`, Apache-2.0) + the
 >   deterministic sample composer.
 > - **Audiobox-Aesthetics-scored redo**: a low-scoring take is re-rendered and
