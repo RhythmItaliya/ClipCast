@@ -61,10 +61,11 @@ PROXY_MAX_AGE_SECONDS = 60 * 60  # schedule refreshes every 15 min
 # (MAX_POLL_ATTEMPTS in src/inngest/functions.ts) raised to match.
 OVERALL_DEADLINE_SECONDS = 3600
 
-# Same markers yt-dlp-proxy uses to decide a proxy is burnt (execute_yt_dlp_command),
-# plus common transport failures.
+# Markers that indicate a proxy is burnt/blocked (transport/network failures).
+# NOTE: "Sign in to" is intentionally NOT here — it's a YouTube auth/fingerprint
+# issue that rotating proxies cannot fix. It is handled separately by the iOS
+# player client and optional cookie auth.
 PROXY_FAILURE_MARKERS = (
-    "Sign in to",
     "403",
     "video is available in",
     "Unable to connect to proxy",
@@ -159,12 +160,26 @@ def _load_free_proxies() -> list[str]:
     return urls
 
 
+def _build_cookies_args(tmp_dir: pathlib.Path) -> list[str]:
+    """If YT_DLP_COOKIES is set in the environment, write it to a temp file
+    and return ["--cookies", "<path>"]. Returns [] if no cookies configured.
+    The cookie content should be a Netscape-format cookies.txt exported from
+    a browser that is signed in to YouTube."""
+    cookies_content = os.environ.get("YT_DLP_COOKIES", "").strip()
+    if not cookies_content:
+        return []
+    cookies_path = tmp_dir / "yt_cookies.txt"
+    cookies_path.write_text(cookies_content)
+    return ["--cookies", str(cookies_path)]
+
+
 def _run_yt_dlp(
     url: str,
     output_template: pathlib.Path,
     proxy: str,
     timeout: float,
     audio_only: bool = False,
+    cookies_args: list[str] | None = None,
 ):
     command = [
         sys.executable,
@@ -172,6 +187,10 @@ def _run_yt_dlp(
         "yt_dlp",
         "--proxy", proxy,
         "--js-runtimes", "deno",
+        # Use the iOS player client — YouTube treats it differently from the
+        # web client and does NOT require "Sign in to confirm you're not a bot"
+        # for most videos. Falls back to mweb if ios fails.
+        "--extractor-args", "youtube:player_client=ios,mweb",
         "--no-playlist",
         "--no-progress",
         "--retries", "4",
@@ -180,6 +199,10 @@ def _run_yt_dlp(
         "--concurrent-fragments", "4",
         "--sleep-requests", "1",
     ]
+    # Optional cookie auth (see _build_cookies_args). Passes --cookies <file>
+    # when YT_DLP_COOKIES secret is set; otherwise omitted entirely.
+    if cookies_args:
+        command += cookies_args
     if audio_only:
         # Grab the best audio-only stream in its native container (no re-encode,
         # no video, no merge) — the mixer re-extracts to 44.1 kHz wav anyway.
@@ -248,6 +271,11 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str, audio_only: boo
     deadline = time.monotonic() + OVERALL_DEADLINE_SECONDS
 
     paid_proxy = os.environ.get("YT_DLP_PROXY", "").strip()
+    # Build cookies args once — written to a temp file inside base_dir so the
+    # file lives for the full download lifetime and is cleaned up with base_dir.
+    cookies_args = _build_cookies_args(base_dir)
+    if cookies_args:
+        print("Cookie auth enabled (YT_DLP_COOKIES is set)")
 
     try:
         if paid_proxy:
@@ -274,11 +302,11 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str, audio_only: boo
                 last_error = f"Timed out after {attempt - 1} proxy attempts: {last_error}"
                 break
 
-            print(f"Attempt {attempt}: downloading via proxy #{attempt}")
+            print(f"Attempt {attempt}: downloading via proxy #{attempt} (ios+mweb player clients)")
             try:
                 result = _run_yt_dlp(
                     youtube_url, output_template, proxy, timeout=remaining,
-                    audio_only=audio_only,
+                    audio_only=audio_only, cookies_args=cookies_args,
                 )
             except subprocess.TimeoutExpired:
                 last_error = "Download timed out through the proxy."
