@@ -292,6 +292,47 @@ export const processVideoFn = inngest.createFunction(
               const detail =
                 (pollResult.data as { detail?: string }).detail ??
                 pollResult.body.slice(0, 600);
+
+              // TEMP — local yt-dlp fallback.
+              // When the Modal cloud downloader fails (e.g. YouTube bot
+              // detection blocks all proxies), fall back to downloading on
+              // this local dev machine via the /api/local-download route.
+              // Remove once Modal is fixed or a residential proxy is set.
+              if (env.LOCAL_DOWNLOAD_ENDPOINT) {
+                console.warn(
+                  `[inngest] Cloud download failed (${pollResult.httpStatus}), ` +
+                  `falling back to local yt-dlp: ${detail.slice(0, 200)}`,
+                );
+                const localResult = await step.run(
+                  "local-download-fallback",
+                  async () => {
+                    const res = await fetch(env.LOCAL_DOWNLOAD_ENDPOINT!, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        youtube_url: youtubeUrl,
+                        s3_key: s3Key,
+                      }),
+                      // Local machine — no cloud timeout worries; 30 min is generous.
+                      signal: AbortSignal.timeout(30 * 60 * 1000),
+                    });
+                    const text = await res.text();
+                    let data: CloudDownloaderResponse = {};
+                    try { data = JSON.parse(text) as CloudDownloaderResponse; } catch { /* raw */ }
+                    return { httpStatus: res.status, data, body: text };
+                  },
+                );
+                if (localResult.httpStatus >= 200 && localResult.httpStatus < 300) {
+                  downloadData = localResult.data;
+                  break;
+                }
+                throw new JobProcessingError(
+                  DOWNLOAD_FAILED_FRIENDLY,
+                  `Local fallback download also failed (HTTP ${localResult.httpStatus}): ` +
+                    localResult.body.slice(0, 600),
+                );
+              }
+
               throw new JobProcessingError(
                 DOWNLOAD_FAILED_FRIENDLY,
                 `Cloud download failed (HTTP ${pollResult.httpStatus}): ${detail}`,
@@ -752,6 +793,43 @@ export const processAudioFn = inngest.createFunction(
           continue;
         }
         if (poll.httpStatus < 200 || poll.httpStatus >= 300) {
+          // TEMP — local yt-dlp fallback (same logic as processVideoFn above).
+          // Remove once Modal is fixed or a residential proxy is configured.
+          if (env.LOCAL_DOWNLOAD_ENDPOINT) {
+            console.warn(
+              `[inngest] Audio cloud download failed (${poll.httpStatus}), ` +
+              `falling back to local yt-dlp`,
+            );
+            const localRes = await step.run(`${prefix}-local-fallback`, async () => {
+              const res = await fetch(env.LOCAL_DOWNLOAD_ENDPOINT!, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  youtube_url: youtubeUrl,
+                  s3_key: s3Key,
+                  audio_only: true,
+                }),
+                signal: AbortSignal.timeout(30 * 60 * 1000),
+              });
+              const text = await res.text();
+              let data: CloudDownloaderResponse = {};
+              try { data = JSON.parse(text) as CloudDownloaderResponse; } catch { /* raw */ }
+              return { httpStatus: res.status, data, body: text };
+            });
+            if (localRes.httpStatus >= 200 && localRes.httpStatus < 300) {
+              return {
+                duration: localRes.data.duration ?? 0,
+                title: localRes.data.title ?? null,
+                uploader: localRes.data.uploader ?? null,
+                heatmap: null,
+              };
+            }
+            throw new JobProcessingError(
+              DOWNLOAD_FAILED_FRIENDLY,
+              `Local fallback audio download failed (HTTP ${localRes.httpStatus}): ` +
+                localRes.body.slice(0, 600),
+            );
+          }
           throw new JobProcessingError(
             DOWNLOAD_FAILED_FRIENDLY,
             `Download failed (HTTP ${poll.httpStatus}): ${poll.body.slice(0, 600)}`,
