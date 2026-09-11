@@ -19,11 +19,16 @@ Open any of them at [excalidraw.com](https://excalidraw.com) → menu → **Open
 ## Regenerating
 
 Every file here is produced by [`generate_diagrams.py`](generate_diagrams.py)
-from the **current** architecture (TanStack data layer, credit ledger, email
-OTP, caption pills, Any/All clip modes, daily auto-clip cron). When the
-system changes, edit the specs in that script and re-run:
+from the architecture (TanStack data layer, credit ledger, email OTP, caption
+pills, Any/All clip modes, daily auto-clip cron). When the system changes, edit
+the specs in that script and re-run:
 
     python3 docs/diagrams/generate_diagrams.py
+
+> **Note:** the current diagram set focuses on the clip pipeline and billing. It
+> does not yet depict the **Audio Studio** (docs/14–16, 19), the **multi-agent
+> production crew** (docs/17–18), or the multi-LLM provider switch (DeepSeek /
+> Gemini / Claude) — update the script's specs and regenerate to add them.
 
 ## How these relate to the other docs folders
 

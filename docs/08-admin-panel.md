@@ -1,5 +1,14 @@
 # ClipCast 08: Admin panel
 
+> **Update (2026-07-18): job observability.** Each row in `/admin/jobs` now
+> links to a **job-detail page** (`/admin/jobs/[id]`, action `getAdminJob`) that
+> shows the full who/what/why/how of a job: user, type/mode/genre, the
+> processing summary, the complete error context (friendly + internal) for
+> debugging, and the **multi-agent Production Room** — every crew decision with
+> which role made it, whether the **real model or the deterministic fallback**
+> ran it (+ the model name), and any per-step failure. Same RBAC as the rest of
+> admin. See docs/17 (the crew) and docs/18 (Langfuse trace dashboard).
+
 Everything lives under `src/app/admin/`, guarded by
 `src/app/admin/layout.tsx` (see [03-authentication-and-roles.md](03-authentication-and-roles.md)
 for the two-layer RBAC: layout redirect + per-action `requireAdmin()`).
@@ -10,7 +19,7 @@ All reads/writes go through `src/actions/admin.ts`. Nav is one array in
 
 | Route | Purpose | Key files |
 |---|---|---|
-| `/admin` | Platform stats at a glance (users, clips, jobs, active/failed jobs, banned users, total revenue), quick links | `app/admin/page.tsx`, `getAdminStats()`/`getAdminRevenueStats()` |
+| `/admin` | Platform stats at a glance (users, clips, jobs, active/failed jobs, banned users, total revenue), quick links, **and the AI-provider control** — a live switch for which LLM drives the crew (DeepSeek / Gemini / Claude), applied to the next job with no redeploy | `app/admin/page.tsx`, `getAdminStats()`/`getAdminRevenueStats()`, `AiProviderSetting` + `getLlmProviderSetting()`/`setLlmProvider()` |
 | `/admin/users` | Every account, search-free paginated table, inline credit adjust / role toggle / ban toggle | `components/admin/users-table.tsx`, `getAdminUsers()` |
 | `/admin/users/[id]` | One user's full picture: profile, credits/role/ban controls, recent jobs, recent clips, purchase history, YouTube/Stripe connection status | `app/admin/users/[id]/page.tsx`, `getAdminUserDetail()` |
 | `/admin/jobs` | Every `UploadedFile` across all users, filterable by status, "reset stuck job(s)" | `components/admin/jobs-table.tsx`, `getAdminJobs()` / `resetSingleJob()` / `resetAllStuckJobs()` |
@@ -25,7 +34,8 @@ written by a single helper, `logAdminAction()` in `src/actions/admin.ts`,
 called from every mutating action: `adjustUserCredits` → `"credits.adjust"`,
 `setUserBanned` → `"user.ban"`/`"user.unban"`, `setUserRole` →
 `"user.promote"`/`"user.demote"`, `resetSingleJob`/`resetAllStuckJobs` →
-`"job.reset"`/`"job.reset_all"`, `deleteAdminClip` → `"clip.delete"`. Logging
+`"job.reset"`/`"job.reset_all"`, `deleteAdminClip` → `"clip.delete"`,
+`setLlmProvider` → `"set_llm_provider"`. Logging
 is best-effort, wrapped in its own `.catch()` so a logging failure can never
 fail the actual mutation the admin intended.
 

@@ -2,6 +2,10 @@ import { ListChecks } from "lucide-react";
 import { getAdminJobs } from "~/actions/admin";
 import { JobsTable } from "~/components/admin/jobs-table";
 
+/**
+ * Admin jobs — paginated table of every processing job, with an optional
+ * ?status filter. Used to monitor progress and cancel stuck jobs.
+ */
 export default async function AdminJobsPage({
   searchParams,
 }: {

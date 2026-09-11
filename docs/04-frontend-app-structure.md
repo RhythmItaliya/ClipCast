@@ -7,9 +7,10 @@ Three top-level areas under `src/app/`:
 - **Public**: `/`, `/login`, `/signup` (redirects/auth forms only, no landing
   page; `/` just redirects based on session state).
 - **`/dashboard/*`**: the regular user app, overview + uploader
-  (`/dashboard`), `clips`, `queue`, `youtube` (channel connect), `billing`,
-  `settings`. Wrapped by `src/app/dashboard/layout.tsx` (auth guard +
-  `DashboardShell`).
+  (`/dashboard`), `audio` (Audio Studio), `clips` (the Library — clips + audio),
+  `queue`, `production/[id]` (the Production Room for one job), `youtube`
+  (channel connect), `billing`, `settings`. Wrapped by
+  `src/app/dashboard/layout.tsx` (auth guard + `DashboardShell`).
 - **`/admin/*`**: the admin panel (see [08-admin-panel.md](08-admin-panel.md)
   for the full breakdown). Wrapped by `src/app/admin/layout.tsx` (role guard +
   `AdminShell`).
@@ -22,8 +23,9 @@ means adding one nav entry, not touching the topbar separately.
 ## Server actions, not a separate API layer
 
 Almost all reads/writes go through `"use server"` functions in `src/actions/`,
-one file per domain (`admin.ts`, `auth.ts`, `clips.ts`, `generation.ts`, `s3.ts`,
-`stripe.ts`, `youtube.ts`). Convention used throughout:
+one file per domain (`admin.ts`, `audio.ts`, `auth.ts`, `clips.ts`,
+`generation.ts`, `otp.ts`, `production.ts`, `s3.ts`, `stripe.ts`, `youtube.ts`).
+Convention used throughout:
 
 - Every action re-checks `auth()` itself; never trust that only an
   authorized UI path could have called it.
@@ -65,6 +67,8 @@ from `src/types/index.ts` so consumers just `import type { ... } from
 - `youtube.ts` — `PendingYouTubeChannel`, `YouTubeVideo`.
 - `billing.ts` — `PriceId`, `CreditTransactionRow`.
 - `settings.ts` — `NotificationPref(s)`, `ClipAppearance`.
+- `production.ts` — the `ProductionLog` / decision-entry shapes rendered by the
+  Production Room (docs/17).
 - `admin.ts` — `AdminUser`, `AdminJob`, `AdminClip` row shapes, mirroring the
   selects in `src/actions/admin.ts`.
 
@@ -93,10 +97,9 @@ Grotesk for headings, DM Sans for body (loaded as CSS variables in
 (Radix underneath). `lucide-react` no longer ships a YouTube icon; use
 `YoutubeIcon` from `src/components/brand.tsx`.
 
-There's a separate `ClipCast_by_me/` directory at the repo root, a
-Lovable-generated design reference the live UI was ported from. It's kept
-as a design reference only; don't edit or delete it, and match its visual
-language for new work.
+The live UI was originally ported from a Lovable-generated design reference
+(`ClipCast_by_me/`, since removed from the repo). Match the existing design
+language — the card, pill-button, and badge conventions above — for new work.
 
 ## How to build a new page, start to finish
 

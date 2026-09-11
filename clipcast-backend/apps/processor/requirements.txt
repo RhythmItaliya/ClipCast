@@ -55,3 +55,8 @@ huggingface-hub>=0.22.0
 tqdm>=4.66.0
 pandas>=2.0.0
 python-dotenv>=1.0.0
+
+# ── Agent monitoring (optional, free/OSS) ─────────────────────────────────────
+# Langfuse (MIT) — visual agent-trace dashboard; activated only when
+# LANGFUSE_PUBLIC_KEY/SECRET_KEY are set (see monitoring.py, docs/18).
+langfuse>=2.0.0

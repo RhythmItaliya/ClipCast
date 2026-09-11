@@ -1,3 +1,6 @@
+// shadcn/ui Button — variant/size styles via class-variance-authority; `asChild`
+// renders the styles onto a child element (e.g. a link) through Radix Slot.
+
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";

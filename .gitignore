@@ -12,13 +12,27 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+.cache/
+.tmp/
+tmp/
+temp/
 *.tmp
 *.swp
 *.swo
 *.swn
 
+# ── Project analysis / generated test artifacts ──────────────
+graphify-out/
+
 # ── Generated media / clips ───────────────────────────────────
 *.mp4
+*.mov
+*.m4v
+*.mkv
+*.webm
+*.mp3
+*.wav
+*.aac
 clips_manifest.json
 
 # ── Environment files — never commit. Use .env.example as a template. ──
@@ -29,15 +43,35 @@ clips_manifest.json
 **/.env.*
 !**/.env.example
 
+# ── Secrets: signed-in YouTube cookies for yt-dlp — NEVER commit. ──
+# These grant access to your Google/YouTube account. The real file lives
+# outside the repo (~/.config/clipcast/yt-cookies.txt); these patterns are a
+# safety net for any cookies file that lands in-repo.
+*cookies*.txt
+yt-cookies.txt
+**/yt-cookies.txt
+*.cookies
+
 # ── ClipCast frontend (Next.js / T3) ──────────────────────────
 clipcast-frontend/node_modules/
 clipcast-frontend/.next/
 clipcast-frontend/out/
+clipcast-frontend/dist/
+clipcast-frontend/build/
+clipcast-frontend/coverage/
 clipcast-frontend/*.tsbuildinfo
 clipcast-frontend/next-env.d.ts
 
 # ── ClipCast backend (Python / Modal) ─────────────────────────
 **/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
 clipcast-backend/*.pyc
 clipcast-backend/*.pyo
 clipcast-backend/*.pyd
@@ -52,3 +86,6 @@ clipcast-backend/env/
 /ClipCast_by_me/
 ClipCast_Docs/
 audio-tests/
+
+# Local LLM gateway key/endpoint (never commit — live secret)
+use-key.txt

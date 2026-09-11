@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * Route-segment error boundary (Next.js `error.tsx`). Catches render/runtime
+ * errors thrown below it, shows a branded fallback, and offers `reset()`
+ * retries before bailing to the dashboard. Must be a Client Component —
+ * error boundaries rely on client-side state.
+ */
 import { RefreshCw, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";

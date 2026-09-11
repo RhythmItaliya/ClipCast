@@ -1,8 +1,15 @@
 import { DeleteObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { Prisma } from "@prisma/client";
 import { env } from "~/env";
 import { inngest } from "./client";
 import { creditsForAudio, creditsForDuration } from "~/lib/credits";
 import { db } from "~/server/db";
+import { getProviderConfig } from "~/server/provider-keys";
+import {
+  DEFAULT_LLM_PROVIDER,
+  LLM_PROVIDERS,
+  type LlmProvider,
+} from "~/lib/llm-providers";
 import {
   clipReadyEmailHtml,
   jobFailedEmailHtml,
@@ -30,6 +37,33 @@ class JobProcessingError extends Error {
 
 const GENERIC_FRIENDLY_ERROR =
   "Something went wrong while processing your video. Please try again, and contact support if it keeps happening.";
+
+/**
+ * Normalize a raw provider string from the job event to a valid provider and
+ * its stored (decrypted) config — API key, model, effort, base URL — if the
+ * admin set them in the UI. These are sent to Modal per-job and override the
+ * backend default for that provider; `null` means fall back to the default.
+ * Kept out of the Inngest event payload — resolved here at dispatch instead.
+ */
+async function resolveLlmConfig(raw: string | undefined): Promise<{
+  provider: LlmProvider;
+  apiKey: string | null;
+  model: string | null;
+  effort: string | null;
+  baseUrl: string | null;
+}> {
+  const provider = (LLM_PROVIDERS as readonly string[]).includes(raw ?? "")
+    ? (raw as LlmProvider)
+    : DEFAULT_LLM_PROVIDER;
+  const cfg = await getProviderConfig(provider);
+  return {
+    provider,
+    apiKey: cfg?.apiKey?.trim() ? cfg.apiKey : null,
+    model: cfg?.model ?? null,
+    effort: cfg?.effort ?? null,
+    baseUrl: cfg?.baseUrl ?? null,
+  };
+}
 
 let s3Client: S3Client | null = null;
 
@@ -101,9 +135,20 @@ export const processVideoFn = inngest.createFunction(
     const clipMode = (event.data as { clipMode?: string }).clipMode ?? "qa";
     const previewOnly =
       (event.data as { previewOnly?: boolean }).previewOnly ?? false;
+    const llmProvider =
+      (event.data as { llmProvider?: string }).llmProvider ?? "deepseek";
+    // Decrypt the admin-configured provider config (key + model + effort + base
+    // URL, any of which may be null) and pass it to Modal below; each overrides
+    // the backend default, null falls back to it.
+    const {
+      apiKey: llmApiKey,
+      model: llmModel,
+      effort: llmEffort,
+      baseUrl: llmBaseUrl,
+    } = await resolveLlmConfig(llmProvider);
 
     try {
-      const { userId, credits, s3Key, captionColor, watermarkText } =
+      const { userId, credits, s3Key, captionColor, watermarkText, jobType } =
         await step.run("check-credits", async () => {
           const uploadedFile = await db.uploadedFile.findUniqueOrThrow({
             where: { id: uploadedFileId },
@@ -117,6 +162,7 @@ export const processVideoFn = inngest.createFunction(
                 },
               },
               s3Key: true,
+              jobType: true,
             },
           });
           return {
@@ -125,8 +171,19 @@ export const processVideoFn = inngest.createFunction(
             s3Key: uploadedFile.s3Key,
             captionColor: uploadedFile.user.captionColor,
             watermarkText: uploadedFile.user.watermarkText,
+            jobType: uploadedFile.jobType,
           };
         });
+
+      // Validation: the clip pipeline must never run an audio job (and the
+      // audio pipeline never a clip job — mirrored in processAudioFn). Guards
+      // against any mis-routed event so the two pipelines stay fully separate.
+      if (jobType === "audio") {
+        throw new JobProcessingError(
+          "This is an audio job and can't be processed as a clip. Please retry it from the queue.",
+          `process-video received audio job ${uploadedFileId}`,
+        );
+      }
 
       // Inngest memoizes completed steps: on replay (which happens after
       // every step.sleep/step.fetch below), this callback is NOT re-invoked,
@@ -221,6 +278,29 @@ export const processVideoFn = inngest.createFunction(
             );
           }
 
+          // TEMP — local yt-dlp fallback. Try downloading on THIS machine when
+          // the cloud path can't get the video: a hard error (bot-detection /
+          // dead proxies) OR a timeout (never finished polling). Returns the
+          // result on success, null if no local endpoint is configured, and
+          // throws if the local attempt itself fails. Remove with the rest of
+          // the scaffolding once the proxy path is reliable.
+          const localDownloadFallback = async (
+            stepId: string,
+          ): Promise<CloudDownloaderResponse | null> => {
+            if (!env.LOCAL_DOWNLOAD_ENDPOINT) return null;
+            const local = await step.run(stepId, () =>
+              postLocalDownload({ youtube_url: youtubeUrl, s3_key: s3Key }),
+            );
+            if (local.httpStatus >= 200 && local.httpStatus < 300) {
+              return local.data;
+            }
+            throw new JobProcessingError(
+              DOWNLOAD_FAILED_FRIENDLY,
+              `Local fallback download failed (HTTP ${local.httpStatus}): ` +
+                local.body.slice(0, 600),
+            );
+          };
+
           // Step 1 — submit the download job (returns call_id immediately)
           const submitted = await step.run(
             "submit-youtube-download",
@@ -277,6 +357,19 @@ export const processVideoFn = inngest.createFunction(
               const detail =
                 (pollResult.data as { detail?: string }).detail ??
                 pollResult.body.slice(0, 600);
+
+              // Cloud download errored (e.g. YouTube bot-detection blocked all
+              // proxies) — try the local machine before giving up.
+              console.warn(
+                `[inngest] Cloud download failed (${pollResult.httpStatus}), ` +
+                  `trying local fallback: ${detail.slice(0, 200)}`,
+              );
+              const local = await localDownloadFallback("local-download-fallback");
+              if (local) {
+                downloadData = local;
+                break;
+              }
+
               throw new JobProcessingError(
                 DOWNLOAD_FAILED_FRIENDLY,
                 `Cloud download failed (HTTP ${pollResult.httpStatus}): ${detail}`,
@@ -289,13 +382,20 @@ export const processVideoFn = inngest.createFunction(
           }
 
           if (!downloadData) {
-            throw new JobProcessingError(
-              "This video is taking longer than expected to download. It " +
-                "may be too long, or YouTube downloads are temporarily " +
-                "restricted. Please try again later.",
-              "Cloud download did not finish within 90 poll attempts (~85 min). " +
-                "The video may be too long or the proxy is blocked.",
-            );
+            // Cloud download never finished (stuck proxy / timed out) — give the
+            // local machine one last try before failing the job.
+            const local = await localDownloadFallback("local-download-timeout");
+            if (local) {
+              downloadData = local;
+            } else {
+              throw new JobProcessingError(
+                "This video is taking longer than expected to download. It " +
+                  "may be too long, or YouTube downloads are temporarily " +
+                  "restricted. Please try again later.",
+                "Cloud download did not finish within 90 poll attempts (~85 min). " +
+                  "The video may be too long or the proxy is blocked.",
+              );
+            }
           }
 
           if (downloadData.duration && downloadData.duration > 0) {
@@ -324,6 +424,14 @@ export const processVideoFn = inngest.createFunction(
             // watermark burned at all).
             caption_color: captionColor,
             watermark_text: watermarkText,
+            // AI-crew provider (Colorist etc.) — admin-selected, defaults deepseek.
+            llm_provider: llmProvider ?? "deepseek",
+            // Admin-managed per-provider config (encrypted at rest); each field
+            // overrides the backend default, null → backend falls back to it.
+            llm_api_key: llmApiKey,
+            llm_model: llmModel,
+            llm_effort: llmEffort,
+            llm_base_url: llmBaseUrl,
           }),
           headers: {
             "Content-Type": "application/json",
@@ -346,6 +454,7 @@ export const processVideoFn = inngest.createFunction(
           clips_rendered?: number;
           clip_warnings?: string[];
           processing_summary?: string;
+          production_log?: unknown[];
           clips?: {
             s3_key: string;
             thumbnail_s3_key?: string;
@@ -387,6 +496,10 @@ export const processVideoFn = inngest.createFunction(
             data: {
               duration: Math.round(exactDuration),
               processingSummary: modalData.processing_summary ?? null,
+              // The clip crew's decision transcript (docs/17) for this job.
+              productionLog: (modalData.production_log ?? undefined) as
+                | Prisma.InputJsonValue
+                | undefined,
             },
           });
           return {
@@ -664,6 +777,7 @@ export const processAudioFn = inngest.createFunction(
       transformStrength,
       remixDurationSeconds,
       targetGenre,
+      llmProvider,
       genre,
       prompt,
     } = event.data as {
@@ -677,9 +791,20 @@ export const processAudioFn = inngest.createFunction(
       transformStrength?: "auto" | "clean" | "subtle" | "transformed" | "max";
       remixDurationSeconds?: number;
       targetGenre?: string;
+      llmProvider?: string;
       genre?: string;
       prompt?: string;
     };
+
+    // Decrypt the admin-configured provider config for the active provider (key
+    // + model + effort + base URL). Merged into the mixer submit payload below
+    // so the music crew can use it.
+    const {
+      apiKey: llmApiKey,
+      model: llmModel,
+      effort: llmEffort,
+      baseUrl: llmBaseUrl,
+    } = await resolveLlmConfig(llmProvider);
 
     const AUDIO_GENERIC_ERROR =
       "Something went wrong while creating your audio. Please try again, and " +
@@ -695,9 +820,45 @@ export const processAudioFn = inngest.createFunction(
       youtubeUrl: string,
       s3Key: string,
       prefix: string,
-    ): Promise<number> {
+    ): Promise<{
+      duration: number;
+      title?: string | null;
+      uploader?: string | null;
+      heatmap?: unknown[] | null;
+    }> {
       // Audio jobs only need the audio track — bestaudio is far faster/smaller
       // than the full up-to-4K video download the clip pipeline uses.
+      // Shape a downloader response (cloud or local) into what callers expect.
+      const toResult = (data: CloudDownloaderResponse) => ({
+        duration: data.duration && data.duration > 0 ? data.duration : 0,
+        title: data.title ?? null,
+        uploader: data.uploader ?? null,
+        heatmap: data.heatmap ?? null,
+      });
+
+      // TEMP — local yt-dlp fallback (same idea as the clip path). Try the
+      // local machine when the cloud download errors OR times out. Returns the
+      // result on success, null if no local endpoint is set, throws on a local
+      // failure. Remove with the scaffolding once the proxy path is reliable.
+      const localAudioFallback = async (
+        stepId: string,
+      ): Promise<CloudDownloaderResponse | null> => {
+        if (!env.LOCAL_DOWNLOAD_ENDPOINT) return null;
+        const local = await step.run(stepId, () =>
+          postLocalDownload({
+            youtube_url: youtubeUrl,
+            s3_key: s3Key,
+            audio_only: true,
+          }),
+        );
+        if (local.httpStatus >= 200 && local.httpStatus < 300) return local.data;
+        throw new JobProcessingError(
+          DOWNLOAD_FAILED_FRIENDLY,
+          `Local fallback audio download failed (HTTP ${local.httpStatus}): ` +
+            local.body.slice(0, 600),
+        );
+      };
+
       const submitted = await step.run(`${prefix}-submit`, () =>
         postCloudDownloader({
           youtube_url: youtubeUrl,
@@ -723,15 +884,23 @@ export const processAudioFn = inngest.createFunction(
           continue;
         }
         if (poll.httpStatus < 200 || poll.httpStatus >= 300) {
+          // Cloud download errored — try the local machine before giving up.
+          console.warn(
+            `[inngest] Audio cloud download failed (${poll.httpStatus}), ` +
+              `trying local fallback`,
+          );
+          const local = await localAudioFallback(`${prefix}-local-fallback`);
+          if (local) return toResult(local);
           throw new JobProcessingError(
             DOWNLOAD_FAILED_FRIENDLY,
             `Download failed (HTTP ${poll.httpStatus}): ${poll.body.slice(0, 600)}`,
           );
         }
-        return poll.data.duration && poll.data.duration > 0
-          ? poll.data.duration
-          : 0;
+        return toResult(poll.data);
       }
+      // Cloud download never finished (stuck proxy / timed out) — last local try.
+      const local = await localAudioFallback(`${prefix}-local-timeout`);
+      if (local) return toResult(local);
       throw new JobProcessingError(
         "This is taking longer than expected. One of the videos may be too " +
           "long, or YouTube downloads are temporarily restricted. Try again later.",
@@ -752,7 +921,13 @@ export const processAudioFn = inngest.createFunction(
         );
       }
       const submitted = await step.run(`${prefix}-submit`, () =>
-        postAudioMixer(payload),
+        postAudioMixer({
+          ...payload,
+          llm_api_key: llmApiKey,
+          llm_model: llmModel,
+          llm_effort: llmEffort,
+          llm_base_url: llmBaseUrl,
+        }),
       );
       const callId = submitted.data.call_id;
       if (submitted.httpStatus !== 202 || !callId) {
@@ -791,13 +966,22 @@ export const processAudioFn = inngest.createFunction(
       const mixSourceCount =
         audioMode === "mashup" ? (sourceCount ?? sources?.length ?? 2) : 0;
       const requiredCredits = creditsForAudio(audioMode, mixSourceCount);
-      const { credits } = await step.run("check-credits-audio", async () => {
+      const { credits, jobType } = await step.run("check-credits-audio", async () => {
         const file = await db.uploadedFile.findUniqueOrThrow({
           where: { id: uploadedFileId },
-          select: { user: { select: { credits: true } } },
+          select: { jobType: true, user: { select: { credits: true } } },
         });
-        return { credits: file.user.credits };
+        return { credits: file.user.credits, jobType: file.jobType };
       });
+
+      // Validation mirror of processVideoFn: the audio pipeline must never run a
+      // clip job, keeping the two fully separate.
+      if (jobType && jobType !== "audio") {
+        throw new JobProcessingError(
+          "This is a clip job and can't be processed as audio. Please retry it from the queue.",
+          `process-audio received clip job ${uploadedFileId}`,
+        );
+      }
 
       if (credits < requiredCredits) {
         await step.run("set-status-no-credits-audio", async () => {
@@ -839,12 +1023,28 @@ export const processAudioFn = inngest.createFunction(
                 );
               }
               const s3Key = `${outPrefix}source_${index + 1}.m4a`;
-              await downloadToS3(source.url, s3Key, prefix);
+              let meta: Awaited<ReturnType<typeof downloadToS3>>;
+              try {
+                meta = await downloadToS3(source.url, s3Key, prefix);
+              } catch (err) {
+                // One flaky source shouldn't kill a multi-source mix — skip it
+                // and mix the rest (we fail only if NONE download, below).
+                console.warn(
+                  `[audio] source ${index + 1} (${source.url}) download failed, skipping:`,
+                  err,
+                );
+                continue;
+              }
               tempAudioSourceKeys.push(s3Key);
               mixerSources.push({
                 s3_key: s3Key,
                 role: source.role ?? "auto",
                 label,
+                // Song Research metadata (docs/19) for this source.
+                title: meta.title ?? null,
+                uploader: meta.uploader ?? null,
+                duration: meta.duration || undefined,
+                heatmap: meta.heatmap ?? null,
               });
             } else {
               if (!source.s3Key) {
@@ -864,6 +1064,16 @@ export const processAudioFn = inngest.createFunction(
             }
           }
 
+          // Every source failed to download (usually a transient proxy/YouTube
+          // issue) — only now do we fail the whole job.
+          if (mixerSources.length === 0) {
+            throw new JobProcessingError(
+              "We couldn't download any of your sources right now. This is " +
+                "usually temporary — please try again in a few minutes.",
+              "all audio sources failed to download",
+            );
+          }
+
           result = await runMixer(
             {
               mode: "mashup",
@@ -872,6 +1082,7 @@ export const processAudioFn = inngest.createFunction(
               transform_strength: transformStrength ?? "auto",
               remix_duration_seconds: remixDurationSeconds ?? 0,
               target_genre: targetGenre ?? "auto",
+              llm_provider: llmProvider ?? "deepseek",
             },
             "mix",
           );
@@ -896,6 +1107,7 @@ export const processAudioFn = inngest.createFunction(
               transform_strength: "auto",
               remix_duration_seconds: remixDurationSeconds ?? 0,
               target_genre: targetGenre ?? "auto",
+              llm_provider: llmProvider ?? "deepseek",
             },
             "mix",
           );
@@ -908,6 +1120,7 @@ export const processAudioFn = inngest.createFunction(
             prompt: prompt ?? null,
             genre: genre ?? null,
             duration_seconds: 20,
+            llm_provider: llmProvider ?? "deepseek",
           },
           "gen",
         );
@@ -993,6 +1206,9 @@ export const processAudioFn = inngest.createFunction(
             status: "processed",
             duration: result.duration ? Math.round(result.duration) : null,
             processingSummary: result.processing_summary ?? null,
+            productionLog: (result.production_log ?? undefined) as
+              | Prisma.InputJsonValue
+              | undefined,
             errorMessage: null,
             internalErrorDetail: null,
           },
@@ -1310,6 +1526,10 @@ type CloudDownloaderResponse = {
   detail?: string;
   s3_key?: string;
   source_bytes?: number;
+  // Song Research (docs/19): captured from yt-dlp's info JSON.
+  title?: string | null;
+  uploader?: string | null;
+  heatmap?: unknown[] | null;
 };
 
 type AudioEventSource = {
@@ -1324,6 +1544,11 @@ type AudioMixerSource = {
   s3_key: string;
   role?: "auto" | "vocal" | "bed" | "extra";
   label?: string;
+  // Song Research (docs/19) metadata for real-lyric lookup + viral hook.
+  title?: string | null;
+  uploader?: string | null;
+  duration?: number;
+  heatmap?: unknown[] | null;
 };
 
 async function postCloudDownloader(payload: {
@@ -1358,6 +1583,36 @@ async function postCloudDownloader(payload: {
   return { httpStatus: response.status, data, body };
 }
 
+/**
+ * TEMP — local yt-dlp fallback transport. Calls the /api/local-download route
+ * that runs yt-dlp on THIS machine (home/residential IP, so YouTube's
+ * datacenter blocking doesn't apply) and uploads to the same S3 key. Same
+ * response shape as postCloudDownloader, so a poll loop can swap it in when the
+ * cloud download can't get the video. Remove with the rest of the local
+ * fallback once the proxy path is reliable.
+ */
+async function postLocalDownload(payload: {
+  youtube_url: string;
+  s3_key: string;
+  audio_only?: boolean;
+}): Promise<{ httpStatus: number; data: CloudDownloaderResponse; body: string }> {
+  const response = await fetch(env.LOCAL_DOWNLOAD_ENDPOINT!, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    // Local machine — no cloud timeout worries; 30 min covers a long video.
+    signal: AbortSignal.timeout(30 * 60 * 1000),
+  });
+  const body = await response.text();
+  let data: CloudDownloaderResponse = {};
+  try {
+    data = JSON.parse(body) as CloudDownloaderResponse;
+  } catch {
+    // Keep the raw body for the error reported to the job record.
+  }
+  return { httpStatus: response.status, data, body };
+}
+
 // ── Audio mixer transport ───────────────────────────────────────────────────
 type AudioMixerClip = {
   s3_key: string;
@@ -1374,6 +1629,8 @@ type AudioMixerResult = {
   wav_s3_key?: string;
   title?: string;
   processing_summary?: string;
+  // The music crew's decision transcript (docs/17 §6).
+  production_log?: unknown[];
   // Mashups return several variations; older single-result callers still get
   // the top-level s3_key (= the first clip).
   clips?: AudioMixerClip[];

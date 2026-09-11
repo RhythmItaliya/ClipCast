@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  Activity,
+  Cpu,
   DollarSign,
   Film,
   LayoutDashboard,
@@ -73,6 +75,18 @@ const nav = [
     to: "/admin/audit",
     icon: ScrollText,
     description: "Every admin action, who did it, and when.",
+  },
+  {
+    title: "AI Providers",
+    to: "/admin/providers",
+    icon: Cpu,
+    description: "LLM providers, active model, and API keys.",
+  },
+  {
+    title: "Services",
+    to: "/admin/health",
+    icon: Activity,
+    description: "Service configuration and connection health.",
   },
 ] as const;
 

@@ -1,7 +1,7 @@
 {
   "type": "excalidraw",
   "version": 2,
-  "source": "https://excalidraw.com",
+  "source": "https://marketplace.visualstudio.com/items?itemName=pomdtr.excalidraw-editor",
   "elements": [
     {
       "id": "Dge58fu1ItSAzO51GUD6g",
@@ -7440,8 +7440,8 @@
         "type": 3
       },
       "seed": 873366037,
-      "version": 1013,
-      "versionNonce": 164728599,
+      "version": 1051,
+      "versionNonce": 333202900,
       "isDeleted": false,
       "boundElements": [
         {
@@ -7453,16 +7453,16 @@
           "type": "arrow"
         }
       ],
-      "updated": 1746683509311,
+      "updated": 1787111563067,
       "link": null,
       "locked": false
     },
     {
       "id": "qs_-SJRNEUSYYkI6ml8P_",
       "type": "text",
-      "x": 11236.650339172755,
+      "x": 11236.650110290919,
       "y": 5615.4535690452285,
-      "width": 162.25584411621094,
+      "width": 162.2563018798828,
       "height": 20,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -7477,11 +7477,11 @@
       "index": "b5K",
       "roundness": null,
       "seed": 1467971445,
-      "version": 1082,
-      "versionNonce": 1214131897,
+      "version": 1121,
+      "versionNonce": 928097260,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1746683509311,
+      "updated": 1787111563070,
       "link": null,
       "locked": false,
       "text": "Create vertical video",
@@ -7497,9 +7497,9 @@
     {
       "id": "cwxY8LrTzXfy7CtL29klv",
       "type": "arrow",
-      "x": 11318.258323883381,
+      "x": 11318.258323883383,
       "y": 5512.034320791775,
-      "width": 0.36275482778364676,
+      "width": 0.36275482778182777,
       "height": 62.809425270165775,
       "angle": 0,
       "strokeColor": "#1e1e1e",
@@ -7516,11 +7516,11 @@
         "type": 2
       },
       "seed": 519842069,
-      "version": 687,
-      "versionNonce": 1502052345,
+      "version": 727,
+      "versionNonce": 1526456532,
       "isDeleted": false,
       "boundElements": [],
-      "updated": 1746683509402,
+      "updated": 1787111563070,
       "link": null,
       "locked": false,
       "points": [
@@ -7529,7 +7529,7 @@
           0
         ],
         [
-          0.36275482778364676,
+          0.36275482778182777,
           62.809425270165775
         ]
       ],
@@ -17366,7 +17366,7 @@
       "version": 603,
       "versionNonce": 1325397595,
       "isDeleted": false,
-      "boundElements": null,
+      "boundElements": [],
       "updated": 1747235998468,
       "link": null,
       "locked": false,

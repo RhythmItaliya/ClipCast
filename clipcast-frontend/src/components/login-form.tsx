@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { signIn, signOut } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
+import { resolveHomePath } from "~/actions/auth";
 import { AuthInput, OrDivider, SocialButtons } from "~/components/auth-ui";
 import { OtpLoginModal } from "~/components/otp-login-modal";
 import { FRIENDLY_MESSAGES, isOffline } from "~/lib/errors";
@@ -74,9 +75,9 @@ export function LoginForm({
       if (signInResult?.error) {
         setError("Invalid email or password.");
       } else {
-        // /post-login checks role server-side and sends admins to /admin,
-        // everyone else to /dashboard.
-        router.push("/post-login");
+        // Go straight to the right home (admin → /admin, else /dashboard),
+        // resolved server-side — no intermediate landing route to flash through.
+        router.push(await resolveHomePath());
       }
     } catch {
       setError(
@@ -95,7 +96,9 @@ export function LoginForm({
     setError(null);
     setOauthLoading(provider);
     try {
-      await signIn(provider, { redirectTo: "/post-login" });
+      // OAuth redirects server-side before any client code runs, so role
+      // routing happens on landing: `/` sends admins to /admin, else /dashboard.
+      await signIn(provider, { redirectTo: "/" });
     } catch {
       setError(FRIENDLY_MESSAGES.network);
       setOauthLoading(null);

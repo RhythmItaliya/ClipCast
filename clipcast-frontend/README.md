@@ -2,9 +2,11 @@
 
 The Next.js (T3 stack) web app for **ClipCast**.
 It handles auth, credits/billing, video upload + YouTube submission, the
-processing queue, and the admin panel. All heavy GPU/AI work runs on the Modal
-backend (see [`../clipcast-backend`](../clipcast-backend)); this app never
-processes video locally.
+**Audio Studio** (AI music generation + mashups), the processing queue, the
+Production Room (the AI crew's decision trail), and the admin panel. All heavy
+GPU/AI work runs on the Modal backend (see
+[`../clipcast-backend`](../clipcast-backend)); this app never processes video or
+audio locally.
 
 Runs on **http://localhost:3000** in dev (`npm run dev`).
 
@@ -24,11 +26,13 @@ Runs on **http://localhost:3000** in dev (`npm run dev`).
 ```
 src/
 ├── app/
-│   ├── dashboard/             user app: overview/uploader, clips, queue, youtube, billing, settings
-│   ├── admin/                 admin panel: overview, users, users/[id], jobs, clips, billing, audit
+│   ├── dashboard/             user app: overview/uploader, audio (Audio Studio),
+│   │                          clips (Library), queue, production/[id], youtube, billing, settings
+│   ├── admin/                 admin panel: overview (+ AI-provider switch), users, users/[id], jobs, jobs/[id], clips, billing, audit
 │   ├── login/, signup/        auth pages
 │   └── api/
 │       ├── auth/[...nextauth]/    NextAuth route handler
+│       ├── inngest/               Inngest serve endpoint (registers all functions)
 │       ├── youtube/callback/      Google OAuth callback for channel connect
 │       ├── stripe/webhook/        Stripe credit-purchase webhook
 │       ├── queue-status/          polls job + credit status (client polling)
@@ -36,26 +40,34 @@ src/
 │       └── reset-stuck-jobs/      manual retry for a stuck job
 ├── actions/                   server actions ("use server"), one file per domain
 │   ├── auth.ts                 signUp, updateProfile, deleteAccount
-│   ├── admin.ts                 all admin reads/mutations (requireAdmin-gated)
+│   ├── admin.ts                 all admin reads/mutations (requireAdmin-gated) + LLM-provider setting
 │   ├── generation.ts             processVideo, processYoutubeVideo, clearQueueItem
+│   ├── audio.ts                  createGeneratedTrack, createMashup, createAdvancedMix
+│   ├── production.ts             read a job's production log (Production Room)
+│   ├── otp.ts                    request/verify email sign-in codes
 │   ├── clips.ts                  getClipUrl (presigned), deleteClip
 │   ├── s3.ts                     presigned upload URL
 │   ├── stripe.ts                 createCheckoutSession
 │   └── youtube.ts                 YouTube OAuth + channel videos
 ├── inngest/
 │   ├── client.ts                 Inngest client config
-│   └── functions.ts              processVideoFn, dailyClipScheduler, syncInngestCancellation
+│   └── functions.ts              processVideoFn, processAudioFn, dailyClipScheduler, weeklySummaryScheduler, sendEmailFn, syncInngestCancellation
 ├── server/
 │   ├── auth/config.ts             NextAuth providers + callbacks (adds role/id to session)
 │   ├── db.ts                       Prisma client singleton
+│   ├── settings.ts                 AppSetting-backed LLM-provider selection
+│   ├── concurrency.ts              shared audio+clip active-job limit
+│   ├── mail.ts / otp.ts            mail transport chain + OTP verification
 │   └── usage.ts                    per-user usage limits (credits/day-cap/active-jobs)
 ├── lib/
 │   ├── limits.ts                   LIMITS constants (single source of truth)
+│   ├── credits.ts                  credit-cost rules (clip per-minute + audio flat pricing)
+│   ├── llm-providers.ts            provider names/labels shared with the admin UI
 │   ├── errors.ts                   friendly error messages, fetchWithTimeout, offline detection
 │   └── auth.ts                     bcrypt hash/compare
 └── components/
-    ├── dashboard/                  uploader, queue table, clips grid, settings, shell/nav
-    ├── admin/                      users/jobs/clips/billing/audit tables, user-detail, shell/nav
+    ├── dashboard/                  uploader, audio-studio, queue table, clips grid, production-room, settings, shell/nav
+    ├── admin/                      users/jobs/clips/billing/audit tables, ai-provider-setting, user-detail, shell/nav
     └── skeletons/                  one skeleton per route shape, paired with a loading.tsx
 ```
 
@@ -74,25 +86,31 @@ directly. Banned users (`User.banned`) fail the Credentials provider's
 The dashboard's **Clip Mode** selector drives which moments the backend
 extracts. The selected value flows: UI → `actions/generation.ts` → Inngest
 event → Modal `clip_mode` → the matching prompt in `CLIP_MODE_PROMPTS`
-(`clipcast-backend/apps/processor/main.py`). Modes: **All**, **Q&A**,
-**Educational**, **Motivational**, **Highlights**.
+(`clipcast-backend/apps/processor/main.py`). Modes: **All** (default), **Any**
+(open-ended, AI-invented category tags), **Q&A**, **Educational**,
+**Motivational**, **Highlights**. Moment selection runs on the admin-selected LLM
+provider (DeepSeek default / Gemini / Claude) with a Hugging Face fallback. See
+[`../docs/13-clip-modes-and-ai.md`](../docs/13-clip-modes-and-ai.md).
 
 ## Credits & billing
 
-1 credit = 1 minute of source video (rounded up, minimum 1 per job). Credits
-are deducted in `inngest/functions.ts`'s `processVideoFn` after Modal returns
-the exact duration. Credit packs are purchased via Stripe Checkout
+For clip jobs, 1 credit = 1 minute of source video (rounded up, minimum 1 per
+job); Audio Studio jobs use flat per-job pricing (generate = 1, mashup = 3 +1
+per extra source). See `lib/credits.ts`. Credits are deducted in
+`inngest/functions.ts` after Modal returns the exact duration. Credit packs are
+purchased via Stripe Checkout
 (`actions/stripe.ts`); the webhook (`app/api/stripe/webhook/route.ts`) credits
 the account and writes a `Purchase` ledger row (idempotent on
 `stripeSessionId`, so Stripe's automatic webhook retries can't double-credit).
 
 ## Admin panel
 
-`/admin` (Overview), `/admin/users` (+ `/admin/users/[id]` detail),
-`/admin/jobs`, `/admin/clips`, `/admin/billing` (revenue + purchase ledger),
-`/admin/audit` (every ban/promote/credit-adjust/job-reset/clip-delete, who did
-it, and when — `AdminAuditLog`, written via `logAdminAction()` in
-`actions/admin.ts`).
+`/admin` (Overview — platform stats + a live **AI-provider switch** for the
+crew), `/admin/users` (+ `/admin/users/[id]` detail), `/admin/jobs` (+
+`/admin/jobs/[id]` detail with the Production Room), `/admin/clips`,
+`/admin/billing` (revenue + purchase ledger), `/admin/audit` (every
+ban/promote/credit-adjust/job-reset/clip-delete/provider-change, who did it, and
+when — `AdminAuditLog`, written via `logAdminAction()` in `actions/admin.ts`).
 
 ## Develop
 

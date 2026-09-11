@@ -9,6 +9,11 @@
 > `decide_edit_length` replace them. The **rating loop is kept**, but it now
 > retries over FX presets (viral → clean) instead of ducking params. See the
 > `apps/mixer/README.md` and `AUDIO_STUDIO_SUMMARY.txt` for the current flow.
+>
+> **Provider note:** "Gemini" below is one example provider. The AI decisions now
+> run on the admin-selected LLM — **DeepSeek** (default), **Gemini**, or
+> **Claude** (`apps/mixer/llm_providers.py`, docs/17) — and always fall back to
+> deterministic logic when none is reachable.
 
 > Companion to [14](14-audio-studio-mode.md) and [15](15-mashup-mixing-mechanics.md).
 > Those cover *what* a mashup is and the mixing mechanics; this covers the two

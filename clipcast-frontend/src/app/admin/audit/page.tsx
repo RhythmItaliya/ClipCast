@@ -2,12 +2,17 @@ import { ScrollText } from "lucide-react";
 import { getAdminAuditLog } from "~/actions/admin";
 import { AuditLogTable } from "~/components/admin/audit-log-table";
 
+/**
+ * Admin audit log — paginated, read-only trail of every admin action
+ * (bans, role changes, credit adjustments, resets, deletes).
+ */
 export default async function AdminAuditPage({
   searchParams,
 }: {
   searchParams: Promise<{ page?: string }>;
 }) {
   const { page: pageParam } = await searchParams;
+  // Parse and clamp the ?page query param to a valid 1-based page (guards NaN).
   const page = Math.max(1, parseInt(pageParam ?? "1", 10) || 1);
 
   const { entries, total, pageSize } = await getAdminAuditLog(page, 30);

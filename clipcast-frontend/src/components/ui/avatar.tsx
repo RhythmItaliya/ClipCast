@@ -1,5 +1,7 @@
 "use client";
 
+// shadcn/ui Avatar, built on Radix UI Avatar (image with graceful text fallback).
+
 import * as React from "react";
 import * as AvatarPrimitive from "@radix-ui/react-avatar";
 

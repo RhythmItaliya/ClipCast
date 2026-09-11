@@ -1,17 +1,70 @@
-import { Scissors } from "lucide-react";
-import { cn } from "~/lib/utils";
+// Brand primitives: logo, wordmark, and the OAuth/YouTube brand icons reused
+// across auth pages, headers and buttons. Kept in one place so the visual
+// identity stays consistent. Server-safe (no client hooks).
+import { cn } from "~/lib/utils"; // Tailwind class merge helper
 
-/** ClipCast logo mark — brand square with scissors (ClipCast_by_me design). */
+/**
+ * ClipCast logo mark — a self-contained, icon-only SVG. A brand-indigo gradient
+ * rounded square holds a crisp white glyph that fuses a broadcast/play signal
+ * with rising audio-waveform bars (the "clip → cast" idea). No wordmark; reads
+ * cleanly down to favicon scale and sits well on light or dark surfaces.
+ * Default size stays ~size-9 and remains overridable via `className` (twMerge).
+ */
 export function LogoMark({ className }: { className?: string }) {
   return (
-    <span
-      className={cn(
-        "bg-brand text-brand-foreground grid size-9 place-items-center rounded-lg",
-        className,
-      )}
+    <svg
+      viewBox="0 0 40 40"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="ClipCast"
+      focusable="false"
+      className={cn("size-9", className)}
     >
-      <Scissors className="size-4" />
-    </span>
+      <defs>
+        <linearGradient
+          id="clipcast-logo-gradient"
+          gradientUnits="userSpaceOnUse"
+          x1="6"
+          y1="3"
+          x2="34"
+          y2="38"
+        >
+          <stop offset="0" stopColor="oklch(0.64 0.18 262)" />
+          <stop offset="0.55" stopColor="oklch(0.55 0.19 260)" />
+          <stop offset="1" stopColor="oklch(0.46 0.2 266)" />
+        </linearGradient>
+      </defs>
+
+      {/* Brand gradient badge + a crisp inset edge-light for depth */}
+      <rect width="40" height="40" rx="13" fill="url(#clipcast-logo-gradient)" />
+      <rect
+        x="1"
+        y="1"
+        width="38"
+        height="38"
+        rx="12"
+        fill="none"
+        stroke="#ffffff"
+        strokeOpacity="0.16"
+      />
+
+      {/* Play / broadcast signal */}
+      <path
+        d="M12 13.5 12 26.5 20.5 20 Z"
+        fill="#ffffff"
+        stroke="#ffffff"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+
+      {/* Rising audio-waveform bars — sound being "cast" outward */}
+      <g fill="#ffffff" fillOpacity="0.92">
+        <rect x="21.6" y="16.5" width="1.9" height="7" rx="0.95" />
+        <rect x="25" y="14.5" width="1.9" height="11" rx="0.95" />
+        <rect x="28.4" y="12.5" width="1.9" height="15" rx="0.95" />
+      </g>
+    </svg>
   );
 }
 
@@ -54,6 +107,7 @@ export function YoutubeIcon({ className }: { className?: string }) {
   );
 }
 
+/** Google "G" mark (inline multi-colour SVG) for the Google OAuth button. */
 export function GoogleIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={cn("h-4 w-4", className)}>
@@ -77,6 +131,7 @@ export function GoogleIcon({ className }: { className?: string }) {
   );
 }
 
+/** Discord mark (inline SVG) for the Discord OAuth button. */
 export function DiscordIcon({ className }: { className?: string }) {
   return (
     <svg

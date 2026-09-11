@@ -15,6 +15,11 @@ import { UserDetailActions } from "~/components/admin/user-detail-actions";
 import { YoutubeIcon } from "~/components/brand";
 import { formatCents } from "~/lib/utils";
 
+/**
+ * Admin user-detail page — full profile for one account: quick stats, connected
+ * integrations (YouTube/Stripe), recent jobs and clips, purchase history, and
+ * the credit ledger, plus admin actions (ban, role change, credit adjust).
+ */
 export default async function AdminUserDetailPage({
   params,
 }: {

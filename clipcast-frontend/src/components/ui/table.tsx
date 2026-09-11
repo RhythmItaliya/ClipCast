@@ -1,5 +1,7 @@
 "use client";
 
+// shadcn/ui Table primitives — styled semantic table elements (wrapped for horizontal scroll).
+
 import * as React from "react";
 
 import { cn } from "~/lib/utils";

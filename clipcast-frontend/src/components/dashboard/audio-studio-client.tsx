@@ -1,8 +1,16 @@
-"use client";
+/**
+ * Audio Studio — interactive client form for the two music-production modes.
+ * "AI Mix" combines up to 6 YouTube links / uploaded audio files into a
+ * beat-matched, hook-detected clip; "Compose" generates an original track from
+ * a text prompt. Both submit to server actions in ~/actions/audio and drop the
+ * job into the processing queue.
+ */
+"use client"; // stateful form + client-side S3 uploads → must run in the browser
 
 import {
+  ChevronDown,
   Link2,
-  Music,
+  Music2,
   Plus,
   Sparkles,
   Trash2,
@@ -10,7 +18,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   createAdvancedMix,
@@ -20,24 +28,8 @@ import {
   type AudioSourceRole,
   type MixTransformStrength,
 } from "~/actions/audio";
-import { Button } from "~/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "~/components/ui/card";
-import { Input } from "~/components/ui/input";
-import { Label } from "~/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
+
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 const GENRES = [
   "auto",
@@ -51,6 +43,46 @@ const GENRES = [
   "rock",
 ] as const;
 
+type Genre = (typeof GENRES)[number];
+
+const GENRE_LABELS: Record<Genre, string> = {
+  auto: "Auto (match the songs)",
+  lofi: "Lo-fi",
+  ambient: "Ambient",
+  cinematic: "Cinematic",
+  trap: "Trap",
+  house: "House",
+  pop: "Pop",
+  bollywood: "Bollywood",
+  rock: "Rock",
+};
+
+const TRANSFORM_LABELS: Record<MixTransformStrength, string> = {
+  auto: "Auto decide",
+  clean: "Clean mix",
+  subtle: "Subtle update",
+  transformed: "Transformed",
+  max: "Max change",
+};
+
+const DURATION_OPTIONS = [
+  { value: "auto", label: "Auto (AI decides)" },
+  { value: "15", label: "15 seconds" },
+  { value: "20", label: "20 seconds" },
+  { value: "30", label: "30 seconds" },
+  { value: "45", label: "45 seconds" },
+  { value: "59", label: "59 seconds (max)" },
+] as const;
+
+const ROLE_OPTIONS: { value: AudioSourceRole; label: string }[] = [
+  { value: "auto", label: "Auto" },
+  { value: "vocal", label: "Vocal" },
+  { value: "bed", label: "Bed" },
+  { value: "extra", label: "Extra" },
+];
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type LocalSource = {
   localId: string;
   kind: "youtube" | "s3";
@@ -61,6 +93,8 @@ type LocalSource = {
   s3Key?: string;
 };
 
+// Builds a blank source row with a stable local id (used as the React key).
+// Falls back to a timestamp id where crypto.randomUUID is unavailable.
 function newSource(kind: "youtube" | "s3" = "youtube"): LocalSource {
   const id =
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -75,14 +109,18 @@ function newSource(kind: "youtube" | "s3" = "youtube"): LocalSource {
   };
 }
 
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export function AudioStudioClient() {
   const router = useRouter();
+  // useTransition keeps the form responsive while the submit server action runs;
+  // `uploading` covers the separate step of pushing local files to S3 first.
   const [pending, startTransition] = useTransition();
   const [uploading, setUploading] = useState(false);
 
   const [prompt, setPrompt] = useState("");
-  const [genre, setGenre] = useState<string>("auto");
-  const [mixGenre, setMixGenre] = useState<string>("auto");
+  const [genre, setGenre] = useState<Genre>("auto");
+  const [mixGenre, setMixGenre] = useState<Genre>("auto");
   const [transformStrength, setTransformStrength] =
     useState<MixTransformStrength>("auto");
   const [remixDuration, setRemixDuration] = useState("auto");
@@ -90,6 +128,7 @@ export function AudioStudioClient() {
     { ...newSource("youtube"), role: "auto", label: "Song A (X)" },
     { ...newSource("youtube"), role: "auto", label: "Song B (ABC)" },
   ]);
+  const [activeTab, setActiveTab] = useState<"mix" | "generate">("mix");
 
   function updateSource(localId: string, patch: Partial<LocalSource>) {
     setSources((current) =>
@@ -125,6 +164,9 @@ export function AudioStudioClient() {
     }
   }
 
+  // Normalizes the local source rows into the server action's input shape.
+  // YouTube rows pass their URL through; file rows are uploaded straight to S3
+  // via a presigned PUT (skipped if already uploaded) and pass their S3 key.
   async function prepareMixSources(): Promise<AudioSourceInput[]> {
     const prepared: AudioSourceInput[] = [];
     for (const source of sources) {
@@ -178,13 +220,14 @@ export function AudioStudioClient() {
           await createAdvancedMix(
             prepared,
             transformStrength,
-            // "auto" → 0 tells the mixer to pick the length musically.
             remixDuration === "auto" ? 0 : Number(remixDuration),
             mixGenre,
           ),
         );
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Could not start mix.");
+        toast.error(
+          error instanceof Error ? error.message : "Could not start mix.",
+        );
       } finally {
         setUploading(false);
       }
@@ -201,267 +244,471 @@ export function AudioStudioClient() {
     source.kind === "youtube" ? source.url.trim() : source.file || source.s3Key,
   );
 
+  const isBusy = pending || uploading;
+
   return (
-    <div className="w-full">
-      <Tabs defaultValue="mix">
-        <TabsList className="mb-6">
-          <TabsTrigger value="mix">
-            <Music className="mr-2 h-4 w-4" /> AI mix
-          </TabsTrigger>
-          <TabsTrigger value="generate">
-            <Wand2 className="mr-2 h-4 w-4" /> Compose
-          </TabsTrigger>
-        </TabsList>
+    <div className="space-y-5">
+      {/* Hero banner — mirrors the Overview hero style */}
+      <section className="border-border from-brand/20 via-brand/5 relative overflow-hidden rounded-3xl border bg-gradient-to-br to-transparent p-5">
+        <div className="bg-brand/15 absolute -top-10 -right-10 size-52 rounded-full blur-3xl" />
+        <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <div className="text-brand flex items-center gap-2 text-xs font-medium">
+              <Sparkles className="size-3.5" />
+              AUDIO STUDIO
+            </div>
+            <h2 className="text-xl font-semibold tracking-tight">
+              Mix two songs into a viral hook, or compose from scratch.
+            </h2>
+            <p className="text-muted-foreground text-sm">
+              Stem-separated, beat-matched, hook-detected — all in one queue
+              job.
+            </p>
+          </div>
+          {/* Animated waveform decoration */}
+          <div className="flex shrink-0 items-end gap-[3px] self-end sm:self-auto">
+            {[0.4, 0.7, 1, 0.6, 0.85, 0.5, 0.9, 0.3, 0.75, 0.55, 0.95, 0.4].map(
+              (h, i) => (
+                <span
+                  key={i}
+                  className="wave-bar bg-brand/40 w-1.5 rounded-full"
+                  style={{
+                    height: `${Math.round(h * 36)}px`,
+                    animationDelay: `${(i * 0.12).toFixed(2)}s`,
+                  }}
+                />
+              ),
+            )}
+          </div>
+        </div>
+      </section>
 
-        <TabsContent value="mix">
-          <Card>
-            <CardHeader>
-              <CardTitle>Viral hook mix (X × ABC)</CardTitle>
-              <CardDescription>
-                Add one or two songs (YouTube or audio). We extract every stem,
-                find the catchiest part of each, focus on the tune, and join them
-                into a short clip with a beat-matched transition and studio FX.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3">
-                {sources.map((source, index) => (
-                  <div
-                    key={source.localId}
-                    className="border-border grid gap-3 rounded-md border p-3 md:grid-cols-[140px_140px_1fr_40px]"
-                  >
-                    <div className="space-y-2">
-                      <Label>Source</Label>
-                      <Select
-                        value={source.kind}
-                        onValueChange={(value: "youtube" | "s3") =>
-                          updateSource(source.localId, {
-                            kind: value,
-                            url: "",
-                            file: undefined,
-                            s3Key: undefined,
-                            label:
-                              value === "youtube"
-                                ? `YouTube ${index + 1}`
-                                : `Audio ${index + 1}`,
-                          })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="youtube">YouTube</SelectItem>
-                          <SelectItem value="s3">Audio file</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+      {/* Tab switcher — same pill pattern as uploader clip-mode row */}
+      <div className="border-border bg-background flex gap-1 overflow-x-auto self-start rounded-full border p-1 w-fit">
+        <TabPill
+          active={activeTab === "mix"}
+          onClick={() => setActiveTab("mix")}
+          icon={<Music2 className="size-3.5" />}
+        >
+          AI Mix
+        </TabPill>
+        <TabPill
+          active={activeTab === "generate"}
+          onClick={() => setActiveTab("generate")}
+          icon={<Wand2 className="size-3.5" />}
+        >
+          Compose
+        </TabPill>
+      </div>
 
-                    <div className="space-y-2">
-                      <Label>Role</Label>
-                      <Select
-                        value={source.role}
-                        onValueChange={(value: AudioSourceRole) =>
-                          updateSource(source.localId, { role: value })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="auto">Auto</SelectItem>
-                          <SelectItem value="vocal">Vocal</SelectItem>
-                          <SelectItem value="bed">Bed</SelectItem>
-                          <SelectItem value="extra">Extra</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>
-                        {source.kind === "youtube" ? "YouTube link" : "Audio file"}
-                      </Label>
-                      {source.kind === "youtube" ? (
-                        <div className="relative">
-                          <Link2 className="text-muted-foreground pointer-events-none absolute top-2.5 left-3 h-4 w-4" />
-                          <Input
-                            className="pl-9"
-                            placeholder="https://youtube.com/watch?v=..."
-                            value={source.url}
-                            onChange={(event) =>
-                              updateSource(source.localId, {
-                                url: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
-                      ) : (
-                        <Input
-                          type="file"
-                          accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/flac,audio/ogg"
-                          onChange={(event) =>
-                            updateSource(source.localId, {
-                              file: event.target.files?.[0],
-                              s3Key: undefined,
-                            })
-                          }
-                        />
-                      )}
-                    </div>
-
-                    <div className="flex items-end">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        onClick={() => removeSource(source.localId)}
-                        disabled={sources.length === 1}
-                        aria-label="Remove source"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+      {/* ── Mix tab ──────────────────────────────────────────────────────────── */}
+      {activeTab === "mix" && (
+        <section className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+          {/* Left — sources */}
+          <div className="border-border bg-surface/60 overflow-hidden rounded-3xl border">
+            {/* Panel header */}
+            <div className="border-border border-b px-5 py-4">
+              <div className="text-muted-foreground flex items-center gap-2 text-[10px] font-semibold tracking-widest uppercase">
+                <Music2 className="size-3.5" />
+                Source tracks
               </div>
+              <p className="text-muted-foreground mt-0.5 text-xs">
+                Add up to 6 sources — YouTube links or local audio files. We
+                extract every stem, find the catchiest hooks, and combine them.
+              </p>
+            </div>
 
-              <div className="flex flex-wrap gap-2">
-                <Button
+            <div className="space-y-3 p-5">
+              {sources.map((source, index) => (
+                <SourceRow
+                  key={source.localId}
+                  source={source}
+                  index={index}
+                  canRemove={sources.length > 1}
+                  isBusy={isBusy}
+                  onUpdate={(patch) => updateSource(source.localId, patch)}
+                  onRemove={() => removeSource(source.localId)}
+                />
+              ))}
+
+              {/* Add source buttons */}
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
                   type="button"
-                  variant="outline"
                   onClick={() => addSource("youtube")}
+                  disabled={isBusy || sources.length >= 6}
+                  className="border-border hover:bg-surface-2 flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-medium transition-colors disabled:opacity-40"
                 >
-                  <Plus className="h-4 w-4" /> YouTube
-                </Button>
-                <Button
+                  <Plus className="size-3.5" /> Add YouTube
+                </button>
+                <button
                   type="button"
-                  variant="outline"
                   onClick={() => addSource("s3")}
+                  disabled={isBusy || sources.length >= 6}
+                  className="border-border hover:bg-surface-2 flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-medium transition-colors disabled:opacity-40"
                 >
-                  <Upload className="h-4 w-4" /> Audio file
-                </Button>
+                  <Upload className="size-3.5" /> Add audio file
+                </button>
               </div>
+            </div>
+          </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="mix-genre">Target genre</Label>
-                <Select value={mixGenre} onValueChange={setMixGenre}>
-                  <SelectTrigger id="mix-genre">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {GENRES.map((item) => (
-                      <SelectItem
-                        key={item}
-                        value={item}
-                        className="capitalize"
-                      >
-                        {item === "auto" ? "Auto (match the songs)" : item}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-muted-foreground text-xs">
-                  Convert the best part of your song{sources.length > 1 ? "s" : ""} into
-                  this style. Auto keeps the source genre.
-                </p>
+          {/* Right — mix settings */}
+          <div className="space-y-4">
+            <SettingsCard label="Target genre">
+              <StyledSelect
+                id="mix-genre"
+                value={mixGenre}
+                onChange={(v) => setMixGenre(v as Genre)}
+                options={GENRES.map((g) => ({ value: g, label: GENRE_LABELS[g] }))}
+              />
+              <p className="text-muted-foreground text-xs">
+                Convert the hook into this style. Auto keeps the source genre.
+              </p>
+            </SettingsCard>
+
+            <SettingsCard label="Beat originality">
+              <StyledSelect
+                id="transform-strength"
+                value={transformStrength}
+                onChange={(v) => setTransformStrength(v as MixTransformStrength)}
+                options={(
+                  ["auto", "clean", "subtle", "transformed", "max"] as MixTransformStrength[]
+                ).map((v) => ({ value: v, label: TRANSFORM_LABELS[v] }))}
+              />
+            </SettingsCard>
+
+            <SettingsCard label="Viral clip length">
+              <StyledSelect
+                id="remix-duration"
+                value={remixDuration}
+                onChange={setRemixDuration}
+                options={DURATION_OPTIONS.map((d) => ({
+                  value: d.value,
+                  label: d.label,
+                }))}
+              />
+            </SettingsCard>
+
+            {/* Submit */}
+            <button
+              onClick={submitMix}
+              disabled={isBusy || !hasMixInput}
+              className="bg-brand text-brand-foreground flex w-full items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-40"
+            >
+              <Sparkles className="size-4" />
+              {isBusy ? "Adding to queue…" : "Create AI mix"}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* ── Generate tab ─────────────────────────────────────────────────────── */}
+      {activeTab === "generate" && (
+        <section className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_300px]">
+          {/* Left — prompt */}
+          <div className="border-border bg-surface/60 overflow-hidden rounded-3xl border">
+            <div className="border-border border-b px-5 py-4">
+              <div className="text-muted-foreground flex items-center gap-2 text-[10px] font-semibold tracking-widest uppercase">
+                <Wand2 className="size-3.5" />
+                Compose a track
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="transform-strength">Beat originality</Label>
-                <Select
-                  value={transformStrength}
-                  onValueChange={(value: MixTransformStrength) =>
-                    setTransformStrength(value)
-                  }
-                >
-                  <SelectTrigger id="transform-strength">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Auto decide</SelectItem>
-                    <SelectItem value="clean">Clean mix</SelectItem>
-                    <SelectItem value="subtle">Subtle update</SelectItem>
-                    <SelectItem value="transformed">Transformed</SelectItem>
-                    <SelectItem value="max">Max change</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="remix-duration">Viral clip length</Label>
-                <Select value={remixDuration} onValueChange={setRemixDuration}>
-                  <SelectTrigger id="remix-duration">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Auto (AI decides)</SelectItem>
-                    <SelectItem value="15">15 seconds</SelectItem>
-                    <SelectItem value="20">20 seconds</SelectItem>
-                    <SelectItem value="30">30 seconds</SelectItem>
-                    <SelectItem value="45">45 seconds</SelectItem>
-                    <SelectItem value="59">59 seconds (max)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Button
-                onClick={submitMix}
-                disabled={pending || uploading || !hasMixInput}
-                className="w-full"
-              >
-                <Sparkles className="mr-2 h-4 w-4" />
-                {pending || uploading ? "Adding..." : "Create AI mix"}
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="generate">
-          <Card>
-            <CardHeader>
-              <CardTitle>Compose a track</CardTitle>
-              <CardDescription>
+              <p className="text-muted-foreground mt-0.5 text-xs">
                 Gemini shapes the producer prompt, then the music model renders
                 the track and the audio rater checks the master.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+              </p>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Song idea */}
               <div className="space-y-2">
-                <Label htmlFor="prompt">Song idea</Label>
-                <Input
-                  id="prompt"
-                  placeholder="Hindi x English dance-pop hook with tabla, warm bass, glossy chorus"
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                />
+                <label
+                  htmlFor="prompt"
+                  className="text-muted-foreground text-[10px] font-semibold tracking-widest uppercase"
+                >
+                  Song idea
+                </label>
+                {/* Textarea-style drop zone */}
+                <div className="border-border bg-background/50 rounded-2xl border-2 border-dashed p-1">
+                  <textarea
+                    id="prompt"
+                    rows={4}
+                    placeholder="Hindi × English dance-pop hook with tabla, warm bass, glossy chorus…"
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    disabled={isBusy}
+                    className="bg-transparent w-full resize-none px-4 py-3 text-sm outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
+                  />
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Be as descriptive as you like — instruments, mood, BPM, language.
+                </p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="genre">Genre</Label>
-                <Select value={genre} onValueChange={setGenre}>
-                  <SelectTrigger id="genre">
-                    <SelectValue placeholder="Pick a genre" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {GENRES.map((item) => (
-                      <SelectItem key={item} value={item} className="capitalize">
-                        {item}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            </div>
+          </div>
+
+          {/* Right — genre + submit */}
+          <div className="space-y-4">
+            <SettingsCard label="Genre">
+              <StyledSelect
+                id="genre"
+                value={genre}
+                onChange={(v) => setGenre(v as Genre)}
+                options={GENRES.map((g) => ({ value: g, label: GENRE_LABELS[g] }))}
+              />
+            </SettingsCard>
+
+            <button
+              onClick={submitGenerate}
+              disabled={isBusy || (!prompt.trim() && !genre)}
+              className="bg-brand text-brand-foreground flex w-full items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-40"
+            >
+              <Wand2 className="size-4" />
+              {isBusy ? "Adding to queue…" : "Compose track"}
+            </button>
+
+            {/* Info card */}
+            <div className="border-border bg-surface/60 rounded-3xl border p-4 space-y-2">
+              <div className="text-muted-foreground text-[10px] font-semibold tracking-widest uppercase">
+                How it works
               </div>
-              <Button
-                onClick={submitGenerate}
-                disabled={pending || (!prompt.trim() && !genre)}
-                className="w-full"
-              >
-                <Wand2 className="mr-2 h-4 w-4" />
-                {pending ? "Adding..." : "Compose track"}
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+              {[
+                "Gemini crafts a production brief from your idea",
+                "Music model renders a full-quality master",
+                "AI rater checks mix quality and retries if needed",
+                "Track lands in your Library when done",
+              ].map((step, i) => (
+                <div key={i} className="flex items-start gap-2.5">
+                  <div className="bg-brand-soft text-brand mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[10px] font-bold">
+                    {i + 1}
+                  </div>
+                  <p className="text-muted-foreground text-xs">{step}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function TabPill({
+  active,
+  onClick,
+  icon,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-medium transition-colors ${
+        active
+          ? "bg-brand text-brand-foreground"
+          : "text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+function SettingsCard({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border-border bg-surface/60 rounded-3xl border p-4 space-y-2">
+      <div className="text-muted-foreground text-[10px] font-semibold tracking-widest uppercase">
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// Native <select> styled to match the design system: appearance-none hides the
+// browser's default arrow, replaced by a lucide ChevronDown layered on top.
+function StyledSelect({
+  id,
+  value,
+  onChange,
+  options,
+}: {
+  id?: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div className="relative">
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="border-border bg-background focus:ring-brand/50 w-full appearance-none rounded-xl border px-3 py-2.5 pr-8 text-sm outline-none focus:ring-2"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="text-muted-foreground pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2" />
+    </div>
+  );
+}
+
+// One source row in the AI Mix panel: switch between a YouTube URL and a local
+// file upload, choose the stem role, or remove the row.
+function SourceRow({
+  source,
+  index,
+  canRemove,
+  isBusy,
+  onUpdate,
+  onRemove,
+}: {
+  source: LocalSource;
+  index: number;
+  canRemove: boolean;
+  isBusy: boolean;
+  onUpdate: (patch: Partial<LocalSource>) => void;
+  onRemove: () => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className="border-border bg-background/50 hover:bg-background rounded-2xl border p-4 transition-colors">
+      {/* Row header */}
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="bg-brand-soft text-brand grid size-7 shrink-0 place-items-center rounded-lg">
+            <Music2 className="size-3.5" />
+          </div>
+          <span className="text-xs font-semibold">
+            Source {index + 1}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Kind toggle pills */}
+          <div className="border-border bg-surface flex gap-1 rounded-full border p-0.5">
+            <button
+              type="button"
+              onClick={() =>
+                onUpdate({ kind: "youtube", url: "", file: undefined, s3Key: undefined })
+              }
+              disabled={isBusy}
+              className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                source.kind === "youtube"
+                  ? "bg-brand text-brand-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              YouTube
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                onUpdate({ kind: "s3", url: "", file: undefined, s3Key: undefined })
+              }
+              disabled={isBusy}
+              className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                source.kind === "s3"
+                  ? "bg-brand text-brand-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              File
+            </button>
+          </div>
+
+          {/* Role select */}
+          <div className="relative">
+            <select
+              value={source.role}
+              onChange={(e) => onUpdate({ role: e.target.value as AudioSourceRole })}
+              disabled={isBusy}
+              className="border-border bg-surface appearance-none rounded-full border py-1 pl-3 pr-6 text-[10px] font-medium outline-none"
+            >
+              {ROLE_OPTIONS.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="text-muted-foreground pointer-events-none absolute top-1/2 right-1.5 size-3 -translate-y-1/2" />
+          </div>
+
+          {/* Remove */}
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={!canRemove || isBusy}
+            aria-label="Remove source"
+            className="text-muted-foreground hover:text-destructive disabled:opacity-30 grid size-7 place-items-center rounded-lg transition-colors"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* Input */}
+      {source.kind === "youtube" ? (
+        <div className="relative">
+          <Link2 className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+          <input
+            type="url"
+            placeholder="https://youtube.com/watch?v=…"
+            value={source.url}
+            onChange={(e) => onUpdate({ url: e.target.value })}
+            disabled={isBusy}
+            className="border-border bg-background focus:ring-brand/50 w-full rounded-xl border py-2.5 pr-4 pl-9 text-sm outline-none focus:ring-2 disabled:opacity-50"
+          />
+        </div>
+      ) : (
+        <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/flac,audio/ogg"
+            className="hidden"
+            disabled={isBusy}
+            onChange={(e) =>
+              onUpdate({ file: e.target.files?.[0], s3Key: undefined })
+            }
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isBusy}
+            className={`border-border w-full rounded-xl border-2 border-dashed py-3 text-center text-sm transition-colors hover:border-brand/50 ${
+              source.file ? "text-foreground" : "text-muted-foreground"
+            }`}
+          >
+            {source.file ? (
+              <span className="font-medium">{source.file.name}</span>
+            ) : (
+              <span className="flex items-center justify-center gap-2">
+                <Upload className="size-4" /> Choose audio file
+              </span>
+            )}
+          </button>
+        </>
+      )}
     </div>
   );
 }

@@ -46,12 +46,25 @@ GENRE_PRESETS: dict[str, dict] = {
 # but noticeably cleaner vocals, which is the most audible part of a mashup.
 DEMUCS_MODEL = "htdemucs_ft"
 CACHE = "/cache"
+# Hard cap on how long the mixer waits for the ACE-Step composer app before
+# giving up and using the deterministic composer. Without this bound a
+# crash-looping / cold composer container hangs the ENTIRE mix (observed: a
+# crash-looping composer stalled a job ~25 min). Covers a cold start + model
+# load; if it's genuinely unhealthy the mix still finishes, just without the
+# neural bed.
+NEURAL_BED_TIMEOUT_SEC = 240
 
 
 class AudioSource(BaseModel):
     s3_key: str
     role: str = "auto"  # "auto" | "vocal" | "bed" | "extra"
     label: str | None = None
+    # Song Research (docs/19): metadata captured by the downloader for real-lyric
+    # lookup + viral-moment hook selection. All optional / best-effort.
+    title: str | None = None
+    uploader: str | None = None
+    duration: float | None = None
+    heatmap: list | None = None
 
 
 class ProcessAudioRequest(BaseModel):
@@ -73,39 +86,45 @@ class ProcessAudioRequest(BaseModel):
     # mixer pick the lane from the sources; any preset overrides it. Same preset
     # vocabulary as the generate genres (see GENRE_PRESETS / decide_mix_style).
     target_genre: str | None = None
+    # Which LLM drives the AI crew: "deepseek" (default) | "gemini" | "claude"
+    # | "openai". Set from the admin AI-provider setting, passed per job.
+    llm_provider: str | None = None
+    # Per-provider config from the admin panel, sent per job (all optional): the
+    # admin's API key (stored encrypted, overrides the Modal secret), the model
+    # id, the Anthropic effort (Claude only), and a custom base URL so the
+    # provider can point at a compatible gateway. None → backend defaults.
+    llm_api_key: str | None = None
+    llm_model: str | None = None
+    llm_effort: str | None = None
+    llm_base_url: str | None = None
+    # TODO(audio, MUSIC_QUALITY_PROBLEMS P0.3): add `instrumental_only: bool` —
+    # when set, force every part's tune_only=True (drop the vocal overlay) so a
+    # user can request a pure instrumental mix. Add a UI toggle on the mix tab.
 
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    # fluidsynth + a GM soundfont power the basic-pitch → MIDI melody replay.
-    .apt_install(
-        "ffmpeg", "rubberband-cli", "fluidsynth", "fluid-soundfont-gm"
-    )
+    .apt_install("ffmpeg", "rubberband-cli")
     .pip_install_from_requirements("requirements.txt")
+    # Installed in a SEPARATE layer so pip resolves them independently of the
+    # pinned ML core (bundling blew up the resolver — "resolution-too-deep").
+    # Lyric transcription for the director + the optional Langfuse monitor.
+    # NOTE: melody re-instrumentation (basic-pitch/pretty_midi/pyfluidsynth) is
+    # temporarily NOT installed — basic-pitch pulls the full TensorFlow and
+    # pretty_midi fails its wheel build, breaking the image. reinstrument_melody
+    # is None-safe, so the mixer just skips that layer until it's re-added with a
+    # lightweight (ONNX) basic-pitch backend.
+    .pip_install("faster-whisper>=1.0.0", "langfuse>=2.0.0")
     .env({"TORCH_HOME": CACHE, "HF_HOME": CACHE})
-    .add_local_python_source("audio_engine")
+    .add_local_python_source(
+        "audio_engine", "crew", "music_crew", "monitoring", "llm_providers",
+        "research",
+    )
 )
 
 app = modal.App("clipcast-mixer", image=image)
 auth_scheme = HTTPBearer()
 model_volume = modal.Volume.from_name("clipcast-mixer-models", create_if_missing=True)
-
-
-def _strip_json(raw: str):
-    """Parse a JSON object from an LLM reply, tolerating ```json fences."""
-    import json
-
-    text = (raw or "").strip()
-    if text.startswith("```json"):
-        text = text[len("```json"):]
-    elif text.startswith("```"):
-        text = text[3:]
-    if text.endswith("```"):
-        text = text[:-3]
-    try:
-        return json.loads(text.strip())
-    except (ValueError, TypeError):
-        return None
 
 
 def _s3():
@@ -257,49 +276,54 @@ class ClipCastMixer:
             print(f"lyric transcription failed: {e}")
             return ""
 
+    def _make_llm(self, provider=None, api_key=None, model=None, effort=None, base_url=None):
+        """Build the crew LLM for the chosen provider (deepseek/gemini/claude/
+        openai), passing the warm Gemini client for the gemini path. The admin's
+        per-provider config (api_key/model/effort/base_url) overrides the backend
+        defaults for that provider; effort is Claude-only. Falls back across
+        configured providers; None → the crew runs on deterministic fallbacks."""
+        from llm_providers import make_llm
+
+        return make_llm(
+            provider, getattr(self, "gemini", None), api_key,
+            model=model, effort=effort, base_url=base_url,
+        )
+
     def _producer_plan(
-        self, lyrics: str, genre: str, target_bpm: float, key_name: str, quality: str
-    ) -> dict:
-        """Act like a producer: read the lyric's emotion + the target genre and
-        decide the mood + a genre instrumental prompt for ACE-Step. Falls back to
-        a deterministic genre plan when Gemini/lyrics are unavailable."""
-        mellow = genre.split()[0] in {"lofi", "ambient", "cinematic", "lofi-bollywood"}
-        fallback = {
-            "mood": "introspective, mellow" if mellow else "energetic, bright",
-            "bed_prompt": (
-                f"{genre} instrumental, {target_bpm:.0f} BPM, key {key_name} {quality}, "
-                "clean production, no vocals, tight drums, musical, cohesive"
-            ),
-            "fx_bias": "clean" if mellow else "viral",
-            "note": f"deterministic {genre} plan",
+        self, lyrics: str, genre: str, target_bpm: float, key_name: str,
+        quality: str, provider: str | None = None, api_key: str | None = None,
+        model: str | None = None, effort: str | None = None,
+        base_url: str | None = None,
+    ):
+        """Run the music crew (docs/17 §3a): lyricist → director → composer →
+        engineer produce the plan the render consumes, plus the ProductionLog.
+        Returns (plan, production_log). Never raises — agents fall back."""
+        from music_crew import music_plan
+
+        brief = {
+            "genre": genre,
+            "target_bpm": target_bpm,
+            "key_name": key_name,
+            "quality": quality,
+            "lyrics": (lyrics or "")[:1500],
         }
-        if not getattr(self, "gemini", None) or not lyrics:
-            return fallback
         try:
-            prompt = (
-                "You are a music producer remixing a song INTO a target genre. "
-                "Read the lyrics' emotion + themes and plan a production that fits "
-                "both the lyric and the genre (e.g. a sad lyric → mellow, sparse "
-                "lofi). Return STRICT JSON only, keys: mood (short phrase), "
-                "bed_prompt (a text-to-music prompt for an instrumental in the "
-                f"target genre; include {target_bpm:.0f} BPM and key {key_name} "
-                f"{quality}; no vocals; under 60 words), fx_bias (\"clean\" or "
-                "\"viral\"). No prose, no code fences.\n"
-                f"Target genre: {genre}\n"
-                f"Lyrics (may be partial):\n{lyrics[:1500]}"
+            return music_plan(
+                self._make_llm(provider, api_key, model, effort, base_url), brief
             )
-            resp = self.gemini.models.generate_content(
-                model="gemini-2.5-flash", contents=prompt
-            )
-            data = _strip_json(resp.text or "")
-            if isinstance(data, dict) and data.get("bed_prompt"):
-                data.setdefault("mood", fallback["mood"])
-                data.setdefault("fx_bias", fallback["fx_bias"])
-                data["note"] = f"Gemini plan · mood {str(data['mood'])[:40]}"
-                return data
         except Exception as e:  # noqa: BLE001
-            print(f"producer plan failed, using deterministic: {e}")
-        return fallback
+            print(f"music crew failed, using deterministic plan: {e}")
+            mellow = (genre or "").split()[0] in {"lofi", "ambient", "cinematic"}
+            plan = {
+                "mood": "introspective, mellow" if mellow else "energetic, bright",
+                "bed_prompt": (
+                    f"{genre} instrumental, {target_bpm:.0f} BPM, key {key_name} {quality}, "
+                    "clean production, no vocals, tight drums, musical, cohesive"
+                ),
+                "fx_bias": "clean" if mellow else "viral",
+                "note": f"deterministic {genre} plan",
+            }
+            return plan, []
 
     # ── Neural genre bed (ACE-Step, isolated app) ─────────────────────────────
     def _neural_bed(
@@ -319,7 +343,13 @@ class ClipCastMixer:
             import soundfile as sf
 
             composer = modal.Cls.from_name("clipcast-composer", "AceComposer")()
-            wav_bytes = composer.generate.remote(prompt, float(duration_sec), int(seed))
+            # spawn + get(timeout) so a crash-looping / cold composer can NEVER
+            # hang the mix — on timeout we fall through to the deterministic bed.
+            call = composer.generate.spawn(prompt, float(duration_sec), int(seed))
+            wav_bytes = call.get(timeout=NEURAL_BED_TIMEOUT_SEC)
+            # TODO(audio, MUSIC_QUALITY_PROBLEMS P0.1/P1.4): key-lock the neural
+            # bed to the vocal's Camelot key (only tempo is locked below), to fix
+            # the vocal-on-generated-bed harmonic clash — the top quality item.
             y, gsr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
             y = ae._to_stereo(np.asarray(y, dtype=np.float32))
             if gsr != 44100:
@@ -454,6 +484,14 @@ class ClipCastMixer:
                     "vocals": vocals,
                     "instrumental": instrumental,
                     "source_wav": str(wav),  # original recording → mastering reference
+                    # Song Research metadata (docs/19) for this source.
+                    "meta": {
+                        "title": source.title,
+                        "uploader": source.uploader,
+                        "duration": source.duration,
+                        "heatmap": source.heatmap,
+                        "label": source.label,
+                    },
                     "balance": balance,
                     "bed_analysis": bed_analysis,
                     "profile": {
@@ -498,35 +536,75 @@ class ClipCastMixer:
         )
         length_mode = "user" if req.remix_duration_seconds else "auto"
 
+        # 4b. SONG RESEARCH (docs/19): fetch the vocal source's REAL lyrics
+        # (LRCLIB → lyrics.ovh → Whisper) and its viral moment from the YouTube
+        # heatmap. Real lyrics feed the director; the viral window seeds the hook
+        # (falling back to energy-based detection when there's no heatmap).
+        import research as song_research
+
+        whisper_lyrics = self._transcribe_lyrics(str(vocal_pick["vocals"]))
+        research_bundle = song_research.research_source(
+            vocal_pick.get("meta", {}),
+            whisper_lyrics,
+            window_sec=part_sec,
+            clip_end=(vocal_pick.get("meta") or {}).get("duration"),
+        )
+        lyrics = research_bundle["lyrics"]
+        viral = research_bundle["viral_window"]
+        vocal_hook = (viral["start"], viral["end"]) if viral else None
+
         if vocal_pick["idx"] != bed_pick["idx"]:
-            part_specs = [(vocal_pick, None), (bed_pick, None)]
+            part_specs = [(vocal_pick, vocal_hook), (bed_pick, None)]
         else:
             solo = vocal_pick
             solo_voc, _ = sf.read(str(solo["vocals"]), dtype="float32")
             solo_inst, _ = sf.read(str(solo["instrumental"]), dtype="float32")
             solo_mono = ae._to_stereo(solo_voc).mean(axis=1) + ae._to_stereo(solo_inst).mean(axis=1)
             hooks = ae.detect_hook(solo_mono, sr, window_sec=part_sec, n=2)
-            part_specs = [(solo, hooks[0]), (solo, hooks[1] if len(hooks) > 1 else hooks[0])]
+            part_specs = [
+                (solo, vocal_hook or hooks[0]),
+                (solo, hooks[1] if len(hooks) > 1 else hooks[0]),
+            ]
 
         built = [self._build_part(item, sr, part_sec, target_bpm, ref_analysis, hook) for item, hook in part_specs]
         part_metas = [p["meta"] for p in built]
         style_label = style_plan["style"]
 
-        # AI Music Director: read the vocal's lyrics + emotion, then plan the
-        # genre transform (mood + a genre instrumental prompt for ACE-Step).
-        # Degrades to a deterministic genre plan if Whisper/Gemini are absent.
+        # AI Music Director: read the REAL lyrics (from Song Research above) +
+        # emotion, then plan the genre transform. `lyrics` is already the best
+        # available (LRCLIB / lyrics.ovh / Whisper). Degrades to a deterministic
+        # plan if Gemini/DeepSeek/Claude are absent.
         lead_key = ae._PITCHES[built[0]["key_root"] % 12]
         lead_quality = "minor" if built[0]["is_minor"] else "major"
-        lyrics = self._transcribe_lyrics(str(vocal_pick["vocals"]))
-        plan = self._producer_plan(lyrics, style_label, target_bpm, lead_key, lead_quality)
+        plan, production_log = self._producer_plan(
+            lyrics, style_label, target_bpm, lead_key, lead_quality,
+            provider=req.llm_provider, api_key=req.llm_api_key,
+            model=req.llm_model, effort=req.llm_effort, base_url=req.llm_base_url,
+        )
         director_prompt = plan["bed_prompt"]
+        research_note = (
+            f"lyrics {research_bundle['lyrics_source'] or 'none'} · "
+            f"viral {research_bundle['viral_source']}"
+            + (
+                f" {viral['start']:.0f}-{viral['end']:.0f}s"
+                if viral
+                else ""
+            )
+        )
 
         # Neural genre bed (ACE-Step) + melody re-instrumentation (basic-pitch →
         # FluidSynth), computed ONCE per part, both driven by the director's plan.
         # Both degrade to None and the deterministic composer if their model/app
         # is unavailable, so this is additive quality that can never break a render.
+        neural_ok = True  # once the composer is down, don't retry it per part
         for pi, p in enumerate(built):
-            p["neural_bed"] = self._neural_bed(director_prompt, target_bpm, part_sec, seed=1000 + pi)
+            p["neural_bed"] = (
+                self._neural_bed(director_prompt, target_bpm, part_sec, seed=1000 + pi)
+                if neural_ok
+                else None
+            )
+            if neural_ok and p["neural_bed"] is None:
+                neural_ok = False
 
             # Carry the recognisable tune: transcribe the vocal (or the
             # instrumental when the part is tune-only) and replay it in-genre.
@@ -543,7 +621,18 @@ class ClipCastMixer:
         # composer + vocal overlay + FX + sequence, so 3 distinct edits are near
         # free. When the user forced a beat-originality strength we honour it and
         # only vary order + FX; on Auto we also vary the production intensity.
-        if req.transform_strength == "auto":
+        forced_genre = bool(req.target_genre and req.target_genre.lower() != "auto")
+        if forced_genre:
+            # The user asked for a SPECIFIC genre — commit to it fully. No diluted
+            # "Chill"/"Clean" take that weakens the genre; every variation is the
+            # requested genre at a genre-committing strength (user's beat
+            # originality if they set one, else transformed/max).
+            strong = req.transform_strength if req.transform_strength != "auto" else "transformed"
+            variations = [
+                ("Remix", (0, 1), strong, "viral"),
+                ("Flip", (1, 0), "max", "viral"),
+            ]
+        elif req.transform_strength == "auto":
             variations = [
                 ("Remix", (0, 1), style_plan["transform_strength"], "viral"),
                 ("Flip", (1, 0), "max", "viral"),
@@ -587,27 +676,65 @@ class ClipCastMixer:
         )
 
         reference_wav = bed_pick.get("source_wav") or vocal_pick.get("source_wav")
-        clips = []
-        for vi, (name, order, strength, fx) in enumerate(variations, start=1):
+
+        # Render + master + rate ONE take. The score comes from Meta's
+        # Audiobox-Aesthetics (a specialist open model built to judge audio
+        # quality) — never a homemade metric.
+        def _make_take(vi: int, tag: str, strength: str, fx: str) -> dict:
             parts = [_render_part(built[idx], strength, fx) for idx in order]
             edit = ae.sequence_parts(parts, sr, target_total, overlap_sec=overlap_sec)
-            wav_p, mp3_p = base_dir / f"v{vi}.wav", base_dir / f"v{vi}.mp3"
-
-            # Reference-master to the source's own recording; fall back to loudnorm.
-            raw_p = base_dir / f"v{vi}_raw.wav"
+            wav_p = base_dir / f"v{vi}{tag}.wav"
+            raw_p = base_dir / f"v{vi}{tag}_raw.wav"
             ae.write_wav(edit, sr, str(raw_p))
             mastered = bool(reference_wav) and ae.reference_master(str(raw_p), reference_wav, str(wav_p))
-            master_mode = "matchering" if mastered else "loudnorm"
             if not mastered:
                 ae.write_wav(ae.normalize_loudness(edit, sr), sr, str(wav_p))
-            mixed_dur = edit.shape[0] / sr  # mastering preserves length
-
             scores = self._rate(str(wav_p))
+            return {
+                "wav_p": wav_p,
+                "scores": scores,
+                "pq": scores.get("PQ") if scores else None,
+                "master_mode": "matchering" if mastered else "loudnorm",
+                "mixed_dur": edit.shape[0] / sr,
+                "fx": fx,
+            }
+
+        # If Audiobox rates a take below target, redo it once with a cleaner FX
+        # pass — a producer sending a take back — and keep whichever scores
+        # higher. Bounded to one retry; the heavy work (Demucs/warp/ACE-Step) is
+        # already cached, so only the cheap FX pass + re-score repeat.
+        # TODO(audio, MUSIC_QUALITY_PROBLEMS P3.13/P3.14): make the redo harder —
+        # on a low score also send work back to the COMPOSER to regenerate the
+        # ACE-Step bed with a new seed/prompt (wire the crew's render-in-the-loop
+        # critic), and optimize Content-Enjoyment too, not just Production
+        # Quality — trying 2-3 arrangement candidates and keeping the best.
+        TARGET_PQ = 7.0
+        clips = []
+        for vi, (name, order, strength, fx) in enumerate(variations, start=1):
+            take = _make_take(vi, "", strength, fx)
+            redone = False
+            # ...but a user-forced genre keeps its committed take rather than a
+            # cleaner/diluted redo.
+            if (
+                take["pq"] is not None
+                and take["pq"] < TARGET_PQ
+                and fx != "clean"
+                and not forced_genre
+            ):
+                redone = True
+                alt = _make_take(vi, "_alt", strength, "clean")
+                if (alt["pq"] or 0.0) > (take["pq"] or 0.0):
+                    take = alt
+
+            wav_p, scores = take["wav_p"], take["scores"]
+            master_mode, mixed_dur = take["master_mode"], take["mixed_dur"]
+            mp3_p = base_dir / f"v{vi}.mp3"
             ae.encode_mp3(str(wav_p), str(mp3_p))
             wav_key, mp3_key = f"{req.out_prefix}v{vi}_master.wav", f"{req.out_prefix}v{vi}_master.mp3"
             _upload_to_s3(wav_p, wav_key, "audio/wav")
             _upload_to_s3(mp3_p, mp3_key, "audio/mpeg")
             pq_txt = f"{scores['PQ']:.1f}/10" if scores and "PQ" in scores else "n/a"
+            fx_txt = f"{take['fx']} (redone)" if redone else fx
             order_txt = " × ".join(part_metas[idx]["label"] for idx in order)
             clips.append(
                 {
@@ -620,9 +747,9 @@ class ClipCastMixer:
                         f"composer kit {ae.style_to_kit(style_label)} "
                         f"(+neural {'on' if neural_on else 'off'}, "
                         f"+melody {'on' if melody_on else 'off'}) ({strength}) · "
-                        f"FX {fx} · master {master_mode} · parts {parts_txt} · "
+                        f"FX {fx_txt} · master {master_mode} · parts {parts_txt} · "
                         f"style {style_label} ({target_bpm:.0f} BPM) · "
-                        f"director {plan['note']} · "
+                        f"director {plan['note']} · research {research_note} · "
                         f"length {mixed_dur:.1f}s ({length_mode}) · Audiobox PQ {pq_txt}"
                     ),
                 }
@@ -633,6 +760,9 @@ class ClipCastMixer:
             "success": True,
             "clips": clips,
             "sources_genres": source_genres,
+            # The crew's decision transcript (docs/17 §6) — surfaced in the
+            # Production Room UI once persisted (Phase 4).
+            "production_log": production_log,
             # top-level fields = first clip, for older single-result callers.
             "duration": first["duration"],
             "s3_key": first["s3_key"],

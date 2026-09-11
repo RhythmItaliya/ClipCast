@@ -3,7 +3,9 @@
 import { v4 as uuidv4 } from "uuid";
 import { inngest } from "~/inngest/client";
 import { auth } from "~/server/auth";
+import { checkConcurrencyLimit } from "~/server/concurrency";
 import { db } from "~/server/db";
+import { getLlmProvider } from "~/server/settings";
 import { checkUsageLimits } from "~/server/usage";
 import type { ActionResult } from "~/types";
 
@@ -66,6 +68,9 @@ export async function processVideo(
 
   if (uploadedVideo.uploaded) return { success: true };
 
+  const busyError = await checkConcurrencyLimit(session.user.id, uploadedFileId);
+  if (busyError) return { success: false, error: busyError };
+
   const validClientDuration =
     typeof clientDurationSeconds === "number" &&
     Number.isFinite(clientDurationSeconds) &&
@@ -90,6 +95,7 @@ export async function processVideo(
     userId: uploadedVideo.userId,
     clipMode,
     previewOnly,
+    llmProvider: await getLlmProvider(),
   });
 
   // No revalidatePath: the dashboard reads queue/credits from the shared
@@ -132,6 +138,9 @@ export async function processYoutubeVideo(
   const limitError = await checkUsageLimits(session.user.id);
   if (limitError) return { success: false, error: limitError };
 
+  const busyError = await checkConcurrencyLimit(session.user.id);
+  if (busyError) return { success: false, error: busyError };
+
   const folderKey = `${uuidv4()}/original.mp4`;
 
   // Create the DB record first — job appears in queue immediately
@@ -154,6 +163,7 @@ export async function processYoutubeVideo(
     youtubeUrl,
     clipMode,
     previewOnly,
+    llmProvider: await getLlmProvider(),
   });
 
   return sent

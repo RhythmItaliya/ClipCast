@@ -1,3 +1,9 @@
+/**
+ * Root layout — wraps every route. Loads global styles and the two Google
+ * fonts (exposed as CSS variables on <html> for Tailwind), and mounts app-wide
+ * chrome: the route-change progress bar, offline banner, confirm-dialog
+ * context, and the toast portal.
+ */
 import "~/styles/globals.css";
 
 import { type Metadata } from "next";
@@ -14,6 +20,8 @@ export const metadata: Metadata = {
   icons: [{ rel: "icon", url: "/favicon.ico" }],
 };
 
+// next/font/google self-hosts these at build time (no runtime request to
+// Google) and exposes each as a CSS variable that Tailwind's font config reads.
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
   variable: "--font-space-grotesk",
@@ -30,6 +38,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${spaceGrotesk.variable} ${dmSans.variable}`}>
       <body>
+        {/* App-wide chrome, mounted once for every route */}
         <TopLoader />
         <NetworkStatus />
         <ConfirmDialogProvider>{children}</ConfirmDialogProvider>

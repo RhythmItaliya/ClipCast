@@ -1,6 +1,29 @@
 # ClipCast 14: Audio Studio mode (AI music + YouTube mashups)
 
-> **Status: plan only.** No code exists for this yet. This document is the
+> **Status update (2026-07-18): BUILT and deployed.** The Audio Studio is live
+> in `apps/mixer` (+ the isolated `apps/composer` ACE-Step app). The current
+> system goes well beyond this original plan:
+> - **AI Music Director crew** (docs/17): lyricist → director → composer →
+>   engineer decide the genre transform from the lyric's emotion; runs on the
+>   admin-selected LLM (DeepSeek default / Gemini / Claude) with deterministic
+>   fallbacks. Every decision is logged. ("Gemini" further down is just one
+>   example provider.)
+> - **ACE-Step neural genre bed** (`apps/composer`, Apache-2.0) + the
+>   deterministic sample composer.
+> - **Audiobox-Aesthetics-scored redo**: a low-scoring take is re-rendered and
+>   the better one kept.
+> - **Audio-only downloads**, reference master (Matchering), FX chain.
+> - **Observability**: the full crew transcript (which role, real model vs
+>   fallback + model name, errors) is in the admin Production Room
+>   (`/admin/jobs/[id]`) and the user Production Room (`/dashboard/production/[id]`).
+> - **Known gaps / what to improve next** are tracked in
+>   `MUSIC_QUALITY_PROBLEMS.txt` (melody re-instrumentation is temporarily off;
+>   vocal-on-generated-bed key-lock is the top quality item). See also docs/16
+>   (rating loop) and docs/18 (monitoring + hosting).
+>
+> The design below is kept for the rationale behind each choice.
+
+> **Original status: plan only.** This document is the
 > end-to-end design: what the feature does, the exact open-source tool for
 > every stage and why, how it slots into the existing ClipCast architecture,
 > and the order to build it in. Read [00-overview.md](00-overview.md),

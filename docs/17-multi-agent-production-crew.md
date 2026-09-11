@@ -1,16 +1,19 @@
 # ClipCast 17: the Multi-Agent Production Crew
 
-> **Status: design / plan.** This is the "deep think first" architecture for
-> turning ClipCast's audio + clip pipelines into a **film-production-style crew
+> **Status: BUILT.** All six phases below are shipped (see the ✅ markers in
+> §10). This doc is kept as the "deep think first" architecture for
+> ClipCast's audio + clip pipelines running as a **film-production-style crew
 > of AI agents** that understand the material emotionally, hand work to each
 > other, argue/revise in a loop, and leave a visible trail of *why* every
 > creative decision was made. Companion to [14](14-audio-studio-mode.md)–[16](16-ai-arrangement-and-audio-rating.md)
-> (audio) and [13](13-clip-modes-and-ai.md) (clips). Nothing here is built yet.
+> (audio) and [13](13-clip-modes-and-ai.md) (clips). The crew runs on the
+> admin-selected LLM (DeepSeek default / Gemini / Claude) and always degrades to
+> deterministic fallbacks.
 
 ## 1. Why a crew, not a single prompt
 
-Today each pipeline has *one* AI decision point — Gemini picks clip moments (doc
-13); Gemini writes one producer plan for the mixer (doc 16 + the new
+Before the crew, each pipeline had *one* AI decision point — the LLM picks clip
+moments (doc 13); the LLM writes one producer plan for the mixer (doc 16 + the
 `_producer_plan`). That's a single director doing everything in one shot.
 
 A real production has **specialists who pass work down a line and give each
@@ -178,13 +181,36 @@ The `ProductionLog` is persisted per job and surfaced as a **Production Room**:
 ## 10. Phased build (each independently shippable)
 
 1. **Framework** — `agents/` module (Agent/Decision/State/Log/Crew) + mock-LLM
-   CPU tests. No behavior change yet.
+   CPU tests. No behavior change yet. **✅ Built** (`clipcast-backend/crew`).
 2. **Music crew** — port the mixer's director into the crew; add Composer/
    Arranger/Engineer/Critic; loop. Deterministic fallbacks = today's output.
+   **✅ Built** (`apps/mixer/music_crew.py`): lyricist → director → composer →
+   engineer produce the plan + ProductionLog that drives the render; headless
+   fallbacks == the pre-crew plan; CPU-tested in `apps/mixer/test_music_crew.py`.
+   (Currently a planning crew, `max_rounds=1`; the render-in-the-loop critic is
+   a later refinement — the framework already supports it, §5.)
 3. **Clip crew** — Story Editor/Writer/**Colorist**/Director/Critic; dynamic
-   caption RGB replaces the hardcoded map.
+   caption RGB replaces the hardcoded map. **✅ Built**
+   (`apps/processor/clip_crew.py`): the **Colorist** decides the caption
+   highlight RGB per clip from its emotion (transcript snippet + category), the
+   category map is only its fallback, and a job-level `production_log` is
+   returned. CPU-tested in `apps/processor/test_clip_crew.py`.
 4. **Observability** — persist + stream the log; the Production Room UI.
+   **✅ Built (persist + view)**: `UploadedFile.productionLog Json?`; both
+   inngest functions write it; `getProductionLog` server action; the
+   **Production Room** page (`/dashboard/production/[id]`) renders the crew's
+   transcript round-by-round with role handoffs, rationales, and a live RGB
+   swatch for the Colorist's pick; linked from each clip group. (Live *streaming*
+   of the log during a run is the remaining piece.)
 5. **Polish** — live crew indicator, "Auto colorist" settings option, docs.
+   Partial: caption auto-color is already the default; the explicit settings
+   toggle + live streaming indicator remain.
+6. **Monitoring** — **✅ Built**: a `Tracer` hook on the crew emits every
+   decision, retry round, and agent failure; `crew/monitoring.py` maps it to
+   **Langfuse** (free/OSS) when `LANGFUSE_*` keys are set, else no-ops. Both
+   crews now run with `max_rounds=2` so the critic can reject a take and redo it
+   (like a studio). See [18](18-agent-monitoring.md) for setup + where compute
+   runs (all on Modal, nothing heavy on your PC).
 
 ## 11. Risks & guardrails
 

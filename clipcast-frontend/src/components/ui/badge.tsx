@@ -1,3 +1,5 @@
+// shadcn/ui Badge — small status/label pill; variants defined via class-variance-authority.
+
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";

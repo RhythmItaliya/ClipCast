@@ -1,9 +1,17 @@
-"use client";
+/**
+ * Clips library grid. Renders finished outputs grouped by their source video —
+ * each group is a collapsible section — with play / download / delete per clip
+ * and, for video clips when a YouTube account is connected, a "Post to YouTube"
+ * modal. Also handles audio-only Audio Studio outputs (mashups / generated
+ * tracks), which play in an <audio> element and hide the YouTube action.
+ */
+"use client"; // media playback, presigned-URL fetches, and modals are client-side
 
 import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clapperboard,
   Clock,
   Download,
   ExternalLink,
@@ -16,6 +24,7 @@ import {
   Video,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
@@ -47,24 +56,34 @@ const THUMB_GRADIENTS = [
   "from-lime-500 via-emerald-500 to-teal-500",
 ];
 
+/** Top-level grid: renders the source groups plus pagination, or an empty state. */
 export function ClipsGrid({
   groups,
   youtubeConnected = false,
   page = 1,
   pageSize = 8,
   total = 0,
+  basePath = "/dashboard/clips",
+  pageParam = "page",
+  emptyState,
+
 }: {
   groups: ClipGroup[];
   youtubeConnected?: boolean;
   page?: number;
   pageSize?: number;
   total?: number;
+  /** Where the pagination Prev/Next navigate (clips vs audio outputs). */
+  basePath?: string;
+  /** Query param this grid paginates on — lets two grids share one page. */
+  pageParam?: string;
+  emptyState?: React.ReactNode;
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   return (
     <section className="space-y-6">
       {groups.length === 0 ? (
-        <EmptyState />
+        (emptyState ?? <EmptyState />)
       ) : (
         <>
           <div className="space-y-4">
@@ -76,7 +95,13 @@ export function ClipsGrid({
               />
             ))}
           </div>
-          <Pagination page={page} totalPages={totalPages} total={total} />
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            total={total}
+            basePath={basePath}
+            pageParam={pageParam}
+          />
         </>
       )}
     </section>
@@ -87,14 +112,18 @@ function Pagination({
   page,
   totalPages,
   total,
+  basePath,
+  pageParam,
 }: {
   page: number;
   totalPages: number;
   total: number;
+  basePath: string;
+  pageParam: string;
 }) {
   const router = useRouter();
   if (totalPages <= 1) return null;
-  const go = (p: number) => router.push(`/dashboard/clips?page=${p}`);
+  const go = (p: number) => router.push(`${basePath}?${pageParam}=${p}`);
   return (
     <div className="flex items-center justify-between gap-3">
       <p className="text-muted-foreground text-xs">
@@ -121,6 +150,7 @@ function Pagination({
   );
 }
 
+/** A collapsible section for one source video and the clips derived from it. */
 function VideoGroupSection({
   group,
   youtubeConnected,
@@ -174,7 +204,18 @@ function VideoGroupSection({
       </button>
 
       {open && (
-        <div className="border-border grid grid-cols-2 gap-4 border-t p-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div className="border-border border-t px-5 pt-3">
+          <Link
+            href={`/dashboard/production/${group.id}`}
+            className="text-muted-foreground hover:text-brand inline-flex items-center gap-1.5 text-xs font-medium"
+          >
+            <Clapperboard className="size-3.5" /> Production Room — see how the AI
+            crew decided this
+          </Link>
+        </div>
+      )}
+      {open && (
+        <div className="grid grid-cols-2 gap-4 p-5 pt-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {group.clips.map((clip, i) => (
             <ClipCard
               key={clip.id}

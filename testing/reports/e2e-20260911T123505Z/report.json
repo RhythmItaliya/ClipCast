@@ -1,0 +1,122 @@
+{
+  "harness": "e2e_full_pipeline",
+  "started_at_utc": "2026-09-11T12:35:05.393509+00:00",
+  "finished_at_utc": "2026-09-11T12:55:34.225459+00:00",
+  "total_seconds": 1228.8,
+  "overall_status": "PASS",
+  "args": {
+    "url": "https://www.youtube.com/watch?v=arj7oStGLkU",
+    "mode": "qa",
+    "preview": true,
+    "audio": false,
+    "audio_only": false,
+    "audio_prompt": "upbeat lofi hip hop instrumental, mellow, jazzy keys, relaxed study vibe",
+    "llm_provider": "claude",
+    "s3_key": null,
+    "timeout": 2700,
+    "no_presign": true
+  },
+  "environment": {
+    "local_download_endpoint": "http://localhost:3000/api/local-download",
+    "process_video_endpoint": "https://littlemovie00--clipcast-clipcast-process-video.modal.run",
+    "process_audio_endpoint": "https://littlemovie00--clipcast-mixer-process-audio.modal.run",
+    "s3_bucket": "my-video-storage-app-281414549138-us-west-2-an",
+    "aws_region": "us-west-2",
+    "boto3_available": true,
+    "python": "3.12.3"
+  },
+  "llm": {
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "medium",
+    "base_url_set": true,
+    "api_key_source": "ANTHROPIC_API_KEY"
+  },
+  "stages": [
+    {
+      "name": "local_download",
+      "status": "PASS",
+      "seconds": 1171.5,
+      "detail": "s3_key=test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/original.mp4, duration=844s, 77.8MB",
+      "error": ""
+    },
+    {
+      "name": "process_clips",
+      "status": "PASS",
+      "seconds": 57.3,
+      "detail": "found=6, rendered=6",
+      "error": ""
+    },
+    {
+      "name": "verify_clips",
+      "status": "PASS",
+      "seconds": 0.0,
+      "detail": "6 clips, in_window=False, captions_ok=True",
+      "error": ""
+    }
+  ],
+  "clips": [
+    {
+      "index": 0,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/preview_0.mp4",
+      "title": "How does the procrastinator get things done?",
+      "category": "Q&A",
+      "duration": 22,
+      "in_target_window": false,
+      "captions_burned": null,
+      "presigned_url": null
+    },
+    {
+      "index": 1,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/preview_1.mp4",
+      "title": "The problem with non-deadline procrastination",
+      "category": "Q&A",
+      "duration": 16,
+      "in_target_window": false,
+      "captions_burned": null,
+      "presigned_url": null
+    },
+    {
+      "index": 2,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/preview_2.mp4",
+      "title": "What happens when the Instant Gratification Monkey takes over?",
+      "category": "Q&A",
+      "duration": 49,
+      "in_target_window": true,
+      "captions_burned": null,
+      "presigned_url": null
+    },
+    {
+      "index": 3,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/preview_3.mp4",
+      "title": "The unseen struggle of long-term procrastination",
+      "category": "Q&A",
+      "duration": 32,
+      "in_target_window": true,
+      "captions_burned": null,
+      "presigned_url": null
+    },
+    {
+      "index": 4,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/preview_4.mp4",
+      "title": "Why is the Instant Gratification Monkey a problem?",
+      "category": "Q&A",
+      "duration": 17,
+      "in_target_window": false,
+      "captions_burned": null,
+      "presigned_url": null
+    },
+    {
+      "index": 5,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/preview_5.mp4",
+      "title": "Are we all procrastinators?",
+      "category": "Q&A",
+      "duration": 16,
+      "in_target_window": false,
+      "captions_burned": null,
+      "presigned_url": null
+    }
+  ],
+  "audio": {},
+  "bugs": []
+}

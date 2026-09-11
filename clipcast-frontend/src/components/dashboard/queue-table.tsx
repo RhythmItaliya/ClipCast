@@ -311,11 +311,17 @@ const QueueRow = memo(function QueueRow({
   const showError =
     (item.status === "failed" || item.status === "no credits") &&
     !!item.errorMessage;
-  const detail = showError
-    ? item.errorMessage
-    : [item.isPreview ? "Preview · 480p" : null, item.clipMode]
-        .filter(Boolean)
-        .join(" · ");
+  // Audio and clip jobs describe themselves differently — an audio job must
+  // NEVER show a clip mode like "qa"/"highlights".
+  const modeLabel =
+    item.jobType === "audio"
+      ? item.audioMode === "generate"
+        ? "Composed track"
+        : "AI mix"
+      : [item.isPreview ? "Preview · 480p" : null, item.clipMode]
+          .filter(Boolean)
+          .join(" · ");
+  const detail = showError ? item.errorMessage : modeLabel;
 
   return (
     <tr className="hover:bg-background/40">
@@ -323,7 +329,7 @@ const QueueRow = memo(function QueueRow({
         <div className="flex items-center gap-3">
           <div className="bg-background ring-border grid size-9 shrink-0 place-items-center rounded-xl ring-1">
             {item.status === "failed" || item.status === "no credits" ? (
-              item.youtubeUrl ? (
+              item.sourceUrls.length > 0 ? (
                 <YoutubeIcon className="text-destructive size-4" />
               ) : (
                 <FileVideo className="text-destructive size-4" />
@@ -339,16 +345,33 @@ const QueueRow = memo(function QueueRow({
               <span className="truncate text-sm font-medium">
                 {item.filename}
               </span>
-              {item.youtubeUrl && (
+              {item.sourceUrls.length === 1 && (
                 <a
-                  href={item.youtubeUrl}
+                  href={item.sourceUrls[0]}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="shrink-0 text-red-500 transition-colors hover:text-red-400"
-                  title="Open original YouTube video"
+                  title="Open the source video"
                 >
                   <Play className="size-3.5 fill-current" />
                 </a>
+              )}
+              {item.sourceUrls.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    item.sourceUrls.forEach((url) =>
+                      window.open(url, "_blank", "noopener,noreferrer"),
+                    )
+                  }
+                  className="flex shrink-0 items-center gap-0.5 text-red-500 transition-colors hover:text-red-400"
+                  title={`Open all ${item.sourceUrls.length} source videos in new tabs`}
+                >
+                  <Play className="size-3.5 fill-current" />
+                  <span className="text-[10px] font-semibold">
+                    ×{item.sourceUrls.length}
+                  </span>
+                </button>
               )}
             </div>
             <div

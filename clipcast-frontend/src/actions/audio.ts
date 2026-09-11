@@ -1,5 +1,13 @@
 "use server";
 
+/**
+ * Audio Studio server actions (docs/14): validate input, gate on
+ * credits/usage/concurrency, create the job row, and fire the Inngest event the
+ * mixer picks up. Two entry points — `createGeneratedTrack` (prompt -> original
+ * music) and `createAdvancedMix` / `createMashup` (blend YouTube + uploaded
+ * sources) — plus a presigned-upload helper for user-provided audio files.
+ */
+
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v4 as uuidv4 } from "uuid";
@@ -7,7 +15,9 @@ import { env } from "~/env";
 import { inngest } from "~/inngest/client";
 import { creditsForAudio } from "~/lib/credits";
 import { auth } from "~/server/auth";
+import { checkConcurrencyLimit } from "~/server/concurrency";
 import { db } from "~/server/db";
+import { getLlmProvider } from "~/server/settings";
 import { checkUsageLimits } from "~/server/usage";
 import type { ActionResult } from "~/types";
 
@@ -146,6 +156,9 @@ export async function generateAudioSourceUploadUrl(fileInfo: {
       Key: key,
       ContentType: fileInfo.contentType,
     });
+    // Presigned PUT: the browser uploads straight to S3, so large audio files
+    // never pass through the Next.js server. 10800s (3h) of headroom for slow
+    // connections, matching the video-upload URL in ~/actions/s3.
     const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 10800 });
     return { success: true, signedUrl, key };
   } catch (err) {
@@ -190,6 +203,9 @@ export async function createAdvancedMix(
   const limitError = await checkUsageLimits(session.user.id);
   if (limitError) return { success: false, error: limitError };
 
+  const busyError = await checkConcurrencyLimit(session.user.id);
+  if (busyError) return { success: false, error: busyError };
+
   const requiredCredits = creditsForAudio("mashup", sources.length);
   const user = await db.user.findUnique({
     where: { id: session.user.id },
@@ -210,6 +226,9 @@ export async function createAdvancedMix(
       displayName: `AI mix (${sources.length} source${sources.length === 1 ? "" : "s"})`,
       jobType: "audio",
       audioMode: "mashup",
+      // Audio jobs are NOT clip jobs — null out the clip-mode default ("qa") so
+      // it can never leak into the audio UI.
+      clipMode: null,
       audioGenre: targetGenre !== "auto" ? targetGenre : null,
       youtubeUrl: youtubeSources[0]?.url ?? null,
       bedYoutubeUrl: youtubeSources[1]?.url ?? null,
@@ -228,6 +247,7 @@ export async function createAdvancedMix(
     transformStrength,
     remixDurationSeconds: clampedDuration,
     targetGenre,
+    llmProvider: await getLlmProvider(),
     // Legacy fields keep older queue/mixer code paths usable.
     vocalUrl: youtubeSources[0]?.url,
     bedUrl: youtubeSources[1]?.url,
@@ -277,6 +297,9 @@ export async function createGeneratedTrack(
   const limitError = await checkUsageLimits(session.user.id);
   if (limitError) return { success: false, error: limitError };
 
+  const busyError = await checkConcurrencyLimit(session.user.id);
+  if (busyError) return { success: false, error: busyError };
+
   const requiredCredits = creditsForAudio("generate");
   const user = await db.user.findUnique({
     where: { id: session.user.id },
@@ -296,6 +319,7 @@ export async function createGeneratedTrack(
       displayName: prompt.trim().slice(0, 80) || `${genre ?? "Generated"} track`,
       jobType: "audio",
       audioMode: "generate",
+      clipMode: null, // not a clip job — never show a clip mode
       audioPrompt: prompt.trim() || null,
       audioGenre: genre ?? null,
       uploaded: true,
@@ -309,6 +333,7 @@ export async function createGeneratedTrack(
     audioMode: "generate",
     prompt: prompt.trim(),
     genre: genre ?? null,
+    llmProvider: await getLlmProvider(),
   });
   return sent
     ? { success: true }

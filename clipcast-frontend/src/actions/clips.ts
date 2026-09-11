@@ -146,13 +146,23 @@ const CLIP_GROUPS_PAGE_SIZE = 8;
 export async function getClipGroups(
   page = 1,
   pageSize = CLIP_GROUPS_PAGE_SIZE,
+  // "clip" = video clip jobs (the Clips page); "audio" = Audio Studio outputs.
+  // Keeps the two kinds of output on their own pages, never mixed.
+  kind: "clip" | "audio" = "clip",
 ): Promise<{ groups: ClipGroup[]; total: number; pageSize: number }> {
   const session = await auth();
   if (!session?.user?.id) return { groups: [], total: 0, pageSize };
 
   // Clips cascade-delete with their source, so every clip has a source here —
-  // grouping by UploadedFile is exhaustive.
-  const where = { userId: session.user.id, clips: { some: {} } };
+  // grouping by UploadedFile is exhaustive. Audio jobs have jobType "audio";
+  // clip jobs have "clip" or null (legacy).
+  const where = {
+    userId: session.user.id,
+    clips: { some: {} },
+    ...(kind === "audio"
+      ? { jobType: "audio" }
+      : { jobType: { not: "audio" } }),
+  };
   const [files, total] = await Promise.all([
     db.uploadedFile.findMany({
       where,

@@ -1,14 +1,21 @@
 "use client";
 
+/**
+ * Dashboard chrome: fixed sidebar + topbar + mobile nav around the routed page
+ * content. Highlights the active nav item, shows the live credit balance, and
+ * handles sign-out. Client component — it reads the current path (usePathname),
+ * subscribes to live-polled credits, and drives the interactive sign-out flow.
+ */
+
 import {
   Coins,
   CreditCard,
   HelpCircle,
   LayoutDashboard,
+  LibraryBig,
   ListChecks,
   LogOut,
   Loader2,
-  Scissors,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -47,22 +54,22 @@ const nav = [
     description: "Turn long-form podcasts into share-ready clips.",
   },
   {
-    title: "Clips",
+    title: "Library",
     to: "/dashboard/clips",
-    icon: Scissors,
-    description: "All clips grouped by source video.",
-  },
-  {
-    title: "Queue",
-    to: "/dashboard/queue",
-    icon: ListChecks,
-    description: "Processing jobs across your workspace.",
+    icon: LibraryBig,
+    description: "Every clip and audio mix you've generated.",
   },
   {
     title: "Audio Studio",
     to: "/dashboard/audio",
     icon: Sparkles,
     description: "Generate music or mash up two songs into a beat-matched mix.",
+  },
+  {
+    title: "Queue",
+    to: "/dashboard/queue",
+    icon: ListChecks,
+    description: "Processing jobs across your workspace.",
   },
   {
     title: "YouTube",

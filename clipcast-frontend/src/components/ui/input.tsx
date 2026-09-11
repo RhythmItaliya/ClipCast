@@ -1,3 +1,5 @@
+// shadcn/ui Input — a styled native <input>.
+
 import * as React from "react";
 
 import { cn } from "~/lib/utils";

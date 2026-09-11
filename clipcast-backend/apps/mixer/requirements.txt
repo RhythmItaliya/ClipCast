@@ -39,11 +39,9 @@ matchering>=2.0.5
 # Production-Quality take. MIT/CC — see docs/16.
 audiobox_aesthetics>=0.0.1
 
-# ── AI Music Director: lyric understanding ────────────────────────────────────
-# faster-whisper transcribes the Demucs vocal stem to lyrics so Gemini can read
-# the song's meaning/emotion and plan the genre transform. Degrades to a
-# deterministic genre plan (no lyrics) if it can't load. CTranslate2 backend.
-faster-whisper>=1.0.0
+# NOTE: faster-whisper, basic-pitch, pretty_midi, pyfluidsynth and langfuse are
+# installed in a SEPARATE image layer (see main.py) — bundling them here made
+# pip's resolver explode ("resolution-too-deep") against the pinned ML core.
 
 # ── AI arrangement brain (which sections to mix, DJ-style) ────────────────────
 # Reuses the same Gemini the clip pipeline already uses (docs/13); falls back to
@@ -60,17 +58,16 @@ pedalboard>=0.9.0
 # transformers MusicGen is the codepath here because it is the most reliable to
 # deploy unattended. To move to the commercially-safe ACE-Step (Apache-2.0, see
 # docs/14), swap `_generate_music()` — the rest of the pipeline is unchanged.
-transformers>=4.44.0,<5.0
+# Cap below 4.49: transformers 4.49+ added the CVE-2025-32434 mitigation that
+# makes torch.load refuse to run on torch < 2.6 for non-safetensors checkpoints
+# (facebook/musicgen-medium ships .bin weights), which 502s the generate worker.
+# We're pinned to torch 2.4.1 here, so stay on the pre-gate line. MusicGen is
+# stable on 4.44-4.48. (Alternative: bump torch>=2.6 in lockstep — heavier.)
+transformers>=4.44.0,<4.49
 accelerate>=0.33.0
 
-# ── Melody re-instrumentation (carry the tune into the target genre) ──────────
-# Spotify basic-pitch (Apache-2.0) transcribes a stem to MIDI on CPU; pretty_midi
-# + pyfluidsynth replay it through the apt-installed GM soundfont as a
-# genre-appropriate lead. reinstrument_melody() returns None (no melody layer)
-# if any of these can't load, so it never breaks a render.
-basic-pitch>=0.3.0
-pretty_midi>=0.2.10
-pyfluidsynth>=1.3.0
+# (Melody re-instrumentation deps — basic-pitch/pretty_midi/pyfluidsynth — are
+# installed in a separate layer in main.py, see the note above.)
 
 # ── AWS / S3 ───────────────────────────────────────────────────────────────────
 boto3>=1.34.0

@@ -1,7 +1,8 @@
 # ClipCast 01: Environment & accounts
 
-Before running anything, you need accounts with 7 external services. Everything
-is configured through **one file at the repo root**: `.env`.
+Before running anything, you need accounts with a handful of external services
+(one LLM provider is enough to start). Everything is configured through **one
+file at the repo root**: `.env`.
 
 ## Why one shared `.env`
 
@@ -31,7 +32,14 @@ cp .env.example .env
 | [Stripe](https://stripe.com) | Credit-pack checkout + webhook | Dashboard → Developers → API keys; create 3 one-time Prices for the credit packs |
 | [Discord Developer Portal](https://discord.com/developers/applications) | OAuth login option | New Application → OAuth2 → Client ID/Secret |
 | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | OAuth login *and* the YouTube channel-connect feature | OAuth client credentials; add redirect URI `{BASE_URL}/api/youtube/callback` |
-| [Google AI Studio](https://aistudio.google.com) | Gemini API key (moment selection) | Get API key |
+| [DeepSeek](https://platform.deepseek.com) | **Default** LLM provider for moment selection + the AI crew | API key |
+| [Google AI Studio](https://aistudio.google.com) | Gemini API key — alternate LLM provider | Get API key |
+| [Anthropic](https://console.anthropic.com) | Claude API key — alternate LLM provider | API key |
+| [Langfuse](https://langfuse.com) *(optional)* | Agent-decision trace dashboard (docs/18) | Free cloud tier or self-host; public + secret keys |
+
+You only need **one** of DeepSeek / Gemini / Claude to run; the active provider
+is chosen per job in the admin panel and the pipeline falls back to deterministic
+logic if none is reachable.
 
 ## Every variable, and who reads it
 
@@ -44,19 +52,23 @@ if this table ever drifts).
 | `AUTH_SECRET` | frontend | NextAuth JWT signing secret (`npx auth secret` to generate) |
 | `DATABASE_URL` | frontend (Prisma) | Pooled (port 6543) Postgres URL, used at runtime |
 | `DIRECT_URL` | frontend (Prisma) | Direct (port 5432) Postgres URL, used for `prisma db push`/migrations |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` | frontend + both Modal apps | S3 access |
-| `S3_BUCKET_NAME` | frontend + both Modal apps | Shared bucket for sources + clips |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_REGION` | frontend + the Modal apps | S3 access |
+| `S3_BUCKET_NAME` | frontend + the Modal apps | Shared bucket for sources + clips + audio |
 | `AUTH_DISCORD_ID` / `AUTH_DISCORD_SECRET` | frontend | Discord OAuth |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | frontend | Google OAuth (login) + YouTube channel connect, both optional; the provider is only registered if both are set |
 | `PROCESS_VIDEO_ENDPOINT` | frontend | The processor Modal app's public URL |
 | `DOWNLOAD_VIDEO_ENDPOINT` | frontend | The downloader Modal app's public URL (optional; a missing value fails only YouTube jobs, not the whole app) |
-| `PROCESS_VIDEO_ENDPOINT_AUTH` | frontend + both Modal apps | Shared bearer token protecting both Modal endpoints |
+| `PROCESS_AUDIO_ENDPOINT` | frontend | The mixer Modal app's public URL for Audio Studio jobs (optional; a missing value fails only audio jobs, with a targeted error) |
+| `PROCESS_VIDEO_ENDPOINT_AUTH` | frontend + the Modal apps | Shared bearer token protecting the Modal endpoints |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | frontend | Stripe API + webhook signature verification |
 | `STRIPE_SMALL_CREDIT_PACK` / `_MEDIUM_` / `_LARGE_` | frontend | Stripe Price IDs for the 3 credit packs |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | frontend (client) | Stripe.js publishable key |
 | `BASE_URL` | frontend | Used to build OAuth redirect URIs and Stripe success URLs |
 | `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` | frontend | `"local"`/`"local"` for local dev; real values from the Inngest Cloud dashboard in production |
-| `GEMINI_API_KEY` | processor (Modal) | Gemini moment-selection calls |
+| `DEEPSEEK_API_KEY` | processor + mixer (Modal) | **Default** LLM provider for moment selection + the AI crew |
+| `GEMINI_API_KEY` | processor + mixer (Modal) | Gemini — alternate LLM provider |
+| `ANTHROPIC_API_KEY` | processor + mixer (Modal) | Claude — alternate LLM provider |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | processor + mixer (Modal) | Optional agent-trace dashboard (docs/18) |
 | `YT_DLP_PATH` | downloader (Modal, local dev only) | Path to the `yt-dlp` binary |
 | `YT_DLP_PROXY` | downloader (Modal) | Optional paid residential proxy override; see [`clipcast-backend/apps/downloader/README.md`](../clipcast-backend/apps/downloader/README.md) |
 
@@ -77,10 +89,12 @@ inside some unrelated request handler months later.
 npm install @t3-oss/env-nextjs zod
 ```
 
-**Step 2: write the schema.** This is the actual file,
-`clipcast-frontend/src/env.js`; every var the app touches is declared once,
-split into `server` (only readable in server code) and `client` (must be
-prefixed `NEXT_PUBLIC_` and is bundled into the browser):
+**Step 2: write the schema.** This is an abridged version of
+`clipcast-frontend/src/env.js` (the live file has since grown to include
+`PROCESS_AUDIO_ENDPOINT`, `YOUTUBE_DURATION_ENDPOINT`, and the mail vars —
+always check the real file for the complete list). Every var the app touches is
+declared once, split into `server` (only readable in server code) and `client`
+(must be prefixed `NEXT_PUBLIC_` and is bundled into the browser):
 
 ```js
 import { createEnv } from "@t3-oss/env-nextjs";

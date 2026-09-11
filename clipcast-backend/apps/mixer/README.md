@@ -1,18 +1,32 @@
 # clipcast-mixer — Audio Studio engine (Modal, GPU)
 
-The third Modal app, alongside `downloader` and `processor`. It is **fully
-independent** of them: its own image, its own torch pin (2.4.1, newer than the
-processor's WhisperX-locked 2.2.2), its own Modal app name (`clipcast-mixer`).
-It **cannot affect the clip pipeline** — nothing here imports from the other
-apps, and the frontend clip flow never calls it.
+One of the four Modal apps, alongside `downloader`, `processor`, and `composer`.
+It is **fully independent** of the clip pipeline: its own image, its own torch
+pin (2.4.1, newer than the processor's WhisperX-locked 2.2.2), its own Modal app
+name (`clipcast-mixer`). It **cannot affect the clip pipeline** — nothing here
+imports from the other apps, and the frontend clip flow never calls it. It does
+call the isolated **`composer`** app (ACE-Step) by name for the neural genre bed,
+with a bounded timeout and a deterministic fallback so a mix never depends on it.
 
-Design and rationale: [`docs/14-audio-studio-mode.md`](../../../docs/14-audio-studio-mode.md)
-and [`docs/15-mashup-mixing-mechanics.md`](../../../docs/15-mashup-mixing-mechanics.md).
+Design and rationale: [`docs/14-audio-studio-mode.md`](../../../docs/14-audio-studio-mode.md),
+[`docs/15`](../../../docs/15-mashup-mixing-mechanics.md), [`docs/16`](../../../docs/16-ai-arrangement-and-audio-rating.md),
+the AI crew ([`docs/17`](../../../docs/17-multi-agent-production-crew.md)), and
+Song Research ([`docs/19`](../../../docs/19-song-research-agent.md)).
 
-One warm `@app.cls` container (`ClipCastMixer`) keeps Gemini and the
-Audiobox-Aesthetics rater resident across jobs via `@modal.enter()`, like the
+One warm `@app.cls` container (`ClipCastMixer`) keeps the LLM provider client and
+the Audiobox-Aesthetics rater resident across jobs via `@modal.enter()`, like the
 processor's model class. A tiny separate CPU function is only the submit/poll
-router — it spawns the warm GPU class method.
+router — it spawns the warm GPU class method. The AI decisions run on the
+admin-selected provider (`llm_provider`: DeepSeek default / Gemini / Claude,
+`llm_providers.py`), always with deterministic fallbacks.
+
+## What runs per mashup
+
+Song Research (`research.py`, docs/19) identifies each source and fetches its
+real lyrics + viral moment; the **music crew** (`music_crew.py`, docs/17 §3a:
+lyricist → director → composer → engineer → critic) turns that into a production
+plan; `audio_engine.py` executes it (stem split, beat/key match, transition, FX,
+rating loop). Every crew decision is recorded to the job's `production_log`.
 
 ## Two modes
 
@@ -40,13 +54,14 @@ Submit/poll, identical shape to the downloader so the Inngest queue reuses its
 polling code:
 
 ```
-POST /process_audio  { mode, out_prefix, ... }   -> 202 { call_id }
-POST /process_audio  { call_id }                 -> 202 pending | 200 { s3_key, wav_s3_key, duration, title, processing_summary }
+POST /process_audio  { mode, out_prefix, genre, prompt, sources, llm_provider, ... }
+                                                 -> 202 { call_id }
+POST /process_audio  { call_id }                 -> 202 pending | 200 { s3_key, wav_s3_key, duration, title, processing_summary, production_log }
 ```
 
 Auth: `Authorization: Bearer $PROCESS_VIDEO_ENDPOINT_AUTH` (the shared token).
-Storage: reads/writes `S3_BUCKET_NAME`. Both from the `clipcast-secret` Modal
-secret — no new secrets. Outputs land at `{out_prefix}master.mp3` and
+Storage: reads/writes `S3_BUCKET_NAME`. The LLM provider keys come from the same
+`clipcast-secret` Modal secret. Outputs land at `{out_prefix}master.mp3` and
 `{out_prefix}master.wav`; the frontend picks the prefix (`audio/<jobId>/`) and
 presigns on read, exactly like clip thumbnails.
 
@@ -66,10 +81,13 @@ First mashup/generate per model downloads weights into the
 
 The musical logic (Camelot matching, tempo folding, key-shift choice, loudness,
 mix alignment) lives in `audio_engine.py` and is CPU-testable, like the
-processor's `captions.py`:
+processor's `captions.py`. The music crew (mock LLM) and Song Research (mocked
+`urllib`) are CPU-tested too:
 
 ```bash
 python apps/mixer/test_audio_engine.py
+python apps/mixer/test_music_crew.py
+python apps/mixer/test_research.py
 ```
 
 ## Known limitations (documented upgrades in docs/15, docs/16)

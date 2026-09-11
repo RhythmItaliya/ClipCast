@@ -1,3 +1,9 @@
+/**
+ * NextAuth (Auth.js v5) configuration: the sign-in providers (Google + Discord
+ * OAuth, email/password credentials, and an emailed 6-digit OTP), a JWT-based
+ * session, and the callbacks that carry the user's id + role through it. Kept
+ * separate from ./index so this config can also be used by edge middleware.
+ */
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { type DefaultSession, type NextAuthConfig } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";

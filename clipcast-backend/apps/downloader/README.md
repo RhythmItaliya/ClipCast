@@ -36,17 +36,25 @@ After the volume is first created (or wiped), seed it once:
 modal run clipcast-backend/apps/downloader/main.py::refresh_proxies
 ```
 
-## Endpoint
+## Endpoints
 
-`download_youtube_video` — `POST`, `@modal.fastapi_endpoint`, bearer-token
-protected by the same `PROCESS_VIDEO_ENDPOINT_AUTH` secret as the processor.
+Two `@modal.fastapi_endpoint`s, both bearer-token protected by the same
+`PROCESS_VIDEO_ENDPOINT_AUTH` secret as the processor:
 
-Request body (`DownloadVideoRequest`): `youtube_url`, `s3_key` (where to write
-the downloaded file in the shared S3 bucket).
-
-Called from the frontend's Inngest function (`postCloudDownloader()` in
-`clipcast-frontend/src/inngest/functions.ts`), which polls Modal's async
-call-result endpoint until the download finishes or fails.
+- **`download_youtube_video`** — `POST`. Request body (`DownloadVideoRequest`):
+  `youtube_url`, `s3_key` (where to write the downloaded file), and `audio_only`
+  (`false` default; when `true` it grabs `bestaudio/best` instead of the full
+  up-to-4K video+merge — far faster/smaller, used for Audio Studio sources). On
+  completion it returns the `duration` plus the source's `title`, `uploader`, and
+  the YouTube **most-replayed `heatmap`** for the Song Research step (docs/19).
+  Called from `postCloudDownloader()` in
+  `clipcast-frontend/src/inngest/functions.ts`, which polls Modal's async
+  call-result endpoint until the download finishes or fails.
+- **`get_youtube_duration`** — `POST`. A fast, **download-free** duration probe
+  (yt-dlp `--print duration`, no video bytes) so the credit gate can see a
+  YouTube job's real cost before committing to the full download. Its URL is
+  `YOUTUBE_DURATION_ENDPOINT`; returns `{"duration": 0}` when it can't estimate,
+  and the frontend falls back to the minimum-credit gate (doc 05).
 
 ## Functions in `main.py`
 
@@ -55,10 +63,12 @@ call-result endpoint until the download finishes or fails.
 | `_load_free_proxies()` | Reads `proxy.json` off the Modal Volume |
 | `_proxy_string(proxy)` | Formats a proxy dict into a yt-dlp `--proxy` URL |
 | `refresh_proxies()` | Scheduled (15 min): re-runs `yt-dlp-proxy update`, writes the top 5 to the volume |
-| `_run_yt_dlp(url, output_template, proxy, timeout)` | Shells out to `yt-dlp` with a given proxy |
+| `_run_yt_dlp(url, output_template, proxy, timeout, audio_only)` | Shells out to `yt-dlp` with a given proxy; `bestaudio` when `audio_only` |
 | `_finished_files(base_dir)` | Finds the downloaded file yt-dlp produced |
-| `download_youtube_video_worker(youtube_url, s3_key)` | Modal function: tries ranked proxies in order, uploads the winner to S3 |
-| `download_youtube_video(...)` | The public FastAPI endpoint — validates the bearer token, kicks off the worker |
+| `_read_source_metadata(base_dir)` | Pulls `title` / `uploader` / most-replayed `heatmap` from yt-dlp's info JSON (Song Research, docs/19) |
+| `download_youtube_video_worker(youtube_url, s3_key, audio_only)` | Modal function: tries ranked proxies in order, uploads the winner to S3, returns duration + source metadata |
+| `download_youtube_video(...)` | Public FastAPI endpoint — validates the bearer token, kicks off the worker |
+| `get_youtube_duration(...)` | Public FastAPI endpoint — download-free duration probe for the credit gate |
 
 ## Deploy
 

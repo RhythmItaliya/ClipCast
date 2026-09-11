@@ -1,6 +1,7 @@
 # ClipCast 15: How we actually join two songs (mixing mechanics)
 
-> **Status: plan only.** This is the deep-dive companion to
+> **Status: built** (the mechanics below run in `apps/mixer/audio_engine.py`).
+> This is the deep-dive companion to
 > [14-audio-studio-mode.md](14-audio-studio-mode.md). Doc 14 is the pipeline
 > and the tool stack; **this doc explains the *music* part in plain language**
 > — why two songs clash, what "join them" really means, how a beat gets

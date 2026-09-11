@@ -2,6 +2,7 @@ import {
   Activity,
   AlertTriangle,
   Coins,
+  Cpu,
   Film,
   ListChecks,
   ShieldOff,
@@ -12,8 +13,16 @@ import type { ReactNode } from "react";
 import { getAdminRevenueStats, getAdminStats } from "~/actions/admin";
 import { formatCents } from "~/lib/utils";
 
+/**
+ * Admin overview — the /admin landing page.
+ * Server component that fetches platform-wide stats + revenue in parallel and
+ * renders them as clickable stat cards plus quick-action shortcuts.
+ */
 export default async function AdminOverviewPage() {
-  const [stats, revenue] = await Promise.all([getAdminStats(), getAdminRevenueStats()]);
+  const [stats, revenue] = await Promise.all([
+    getAdminStats(),
+    getAdminRevenueStats(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -90,6 +99,16 @@ export default async function AdminOverviewPage() {
           <QuickLink
             href="/admin/jobs?status=processing"
             label="Active Jobs"
+            icon={<Activity className="size-3.5" />}
+          />
+          <QuickLink
+            href="/admin/providers"
+            label="AI Providers"
+            icon={<Cpu className="size-3.5" />}
+          />
+          <QuickLink
+            href="/admin/health"
+            label="Services"
             icon={<Activity className="size-3.5" />}
           />
         </div>

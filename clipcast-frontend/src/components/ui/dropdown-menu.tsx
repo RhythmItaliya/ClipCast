@@ -1,5 +1,7 @@
 "use client";
 
+// shadcn/ui DropdownMenu, built on Radix UI Dropdown Menu.
+
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";

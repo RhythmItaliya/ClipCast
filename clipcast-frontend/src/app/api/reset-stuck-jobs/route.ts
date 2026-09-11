@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "~/server/auth";
 import { db } from "~/server/db";
+import { getLlmProvider } from "~/server/settings";
 import { inngest } from "~/inngest/client";
 /**
  * POST /api/reset-stuck-jobs
@@ -35,6 +36,16 @@ export async function POST(req: NextRequest) {
       userId: true,
       youtubeUrl: true,
       status: true,
+      // jobType decides WHICH pipeline the retry re-runs (audio vs clip) — the
+      // rest lets us rebuild that job's original event instead of a default one.
+      jobType: true,
+      clipMode: true,
+      isPreview: true,
+      audioMode: true,
+      audioSources: true,
+      audioGenre: true,
+      audioPrompt: true,
+      bedYoutubeUrl: true,
     },
   });
 
@@ -57,19 +68,49 @@ export async function POST(req: NextRequest) {
     data: { status: "queued", errorMessage: null, internalErrorDetail: null },
   });
 
+  const llmProvider = await getLlmProvider();
   try {
-    await inngest.send({
-      name: "process-video-events",
-      data: {
-        uploadedFileId: specificFile.id,
-        userId: specificFile.userId,
-        ...(specificFile.youtubeUrl
-          ? { youtubeUrl: specificFile.youtubeUrl }
-          : {}),
-        clipMode: "qa",
-        previewOnly: false,
-      },
-    });
+    if (specificFile.jobType === "audio") {
+      // Rebuild the AUDIO job's event (transform strength / duration weren't
+      // stored, so they fall back to the mixer's defaults on retry).
+      const sources = Array.isArray(specificFile.audioSources)
+        ? specificFile.audioSources
+        : [];
+      await inngest.send({
+        name: "process-audio-events",
+        data: {
+          uploadedFileId: specificFile.id,
+          userId: specificFile.userId,
+          audioMode: specificFile.audioMode ?? "mashup",
+          sources,
+          sourceCount: sources.length,
+          transformStrength: "auto",
+          remixDurationSeconds: 0,
+          targetGenre: specificFile.audioGenre ?? "auto",
+          prompt: specificFile.audioPrompt ?? "",
+          genre: specificFile.audioGenre ?? null,
+          llmProvider,
+          // Legacy two-URL fields for older mixer code paths.
+          ...(specificFile.youtubeUrl ? { vocalUrl: specificFile.youtubeUrl } : {}),
+          ...(specificFile.bedYoutubeUrl ? { bedUrl: specificFile.bedYoutubeUrl } : {}),
+        },
+      });
+    } else {
+      await inngest.send({
+        name: "process-video-events",
+        data: {
+          uploadedFileId: specificFile.id,
+          userId: specificFile.userId,
+          ...(specificFile.youtubeUrl
+            ? { youtubeUrl: specificFile.youtubeUrl }
+            : {}),
+          // Keep the job's ORIGINAL mode/preview, not a hardcoded "qa".
+          clipMode: specificFile.clipMode ?? "qa",
+          previewOnly: specificFile.isPreview ?? false,
+          llmProvider,
+        },
+      });
+    }
   } catch (err) {
     console.warn("[reset-stuck-jobs] inngest.send failed (non-fatal):", err);
   }

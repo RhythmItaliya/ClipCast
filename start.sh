@@ -122,7 +122,10 @@ required_pids+=("${pids[-1]}")
 
 # Stripe webhook forwarder — needed for credit-purchase webhooks in local dev.
 # Optional: only starts if the Stripe CLI is installed and logged in.
-if command -v stripe >/dev/null 2>&1; then
+if [[ -x "$ROOT/stripe" ]]; then
+  echo "==> Starting Stripe webhook listener (local binary) -> localhost:3000/api/stripe/webhook"
+  start_service "$ROOT" ./stripe listen --forward-to localhost:3000/api/stripe/webhook
+elif command -v stripe >/dev/null 2>&1; then
   echo "==> Starting Stripe webhook listener -> localhost:3000/api/stripe/webhook"
   start_service "$ROOT" stripe listen --forward-to localhost:3000/api/stripe/webhook
 else
@@ -140,6 +143,14 @@ cat <<'BANNER'
     Stripe   : forwarding webhooks (if CLI installed)
     Backend  : Modal cloud (already deployed) —
                ALL heavy GPU/AI work runs there, never locally.
+
+  Crew debug / observability (see how the AI agents decided each job):
+    Admin    : http://localhost:3000/admin/jobs   (click "Inspect" on a job:
+               who/what/why per step, real model vs fallback, errors)
+    User view: http://localhost:3000/dashboard/production/<jobId>
+    Langfuse : http://localhost:3001  (only if you ran
+               docker-compose.langfuse.yml; else use the free cloud.langfuse.com)
+
   Press Ctrl+C to stop everything.
 ──────────────────────────────────────────────
 

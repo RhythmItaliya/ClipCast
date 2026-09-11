@@ -22,17 +22,20 @@
 
 ClipCast is an AI podcast clipper. Upload a long-form video, or just paste a
 YouTube link, and it hands back a set of short vertical clips: automatically
-transcribed, automatically selected by an LLM, captioned, and reframed to
-9:16, ready to post as Shorts, Reels, or TikToks.
+transcribed, automatically selected and viral-ranked by an LLM, captioned, and
+reframed to 9:16, ready to post as Shorts, Reels, or TikToks. It also has an
+**Audio Studio** that generates original instrumentals from a prompt or mashes
+up two YouTube tracks — both driven by a multi-agent AI production crew.
 
 The project is split into two halves:
 
 - **The web app**, the Next.js frontend, in the `clipcast-frontend` folder.
-  It handles sign-in, billing, uploads, and the admin panel. See
-  [clipcast-frontend/README.md](clipcast-frontend/README.md).
-- **The processing backend**, a Python service that runs on Modal's cloud
-  GPUs, in the `clipcast-backend` folder. It downloads the video, transcribes
-  it, picks the best moments, and renders the final clips. See
+  It handles sign-in, billing, uploads, the Audio Studio, and the admin panel.
+  See [clipcast-frontend/README.md](clipcast-frontend/README.md).
+- **The processing backend**, four Python apps that run on Modal's cloud GPUs,
+  in the `clipcast-backend` folder: a downloader, the clip processor, the audio
+  mixer, and the ACE-Step music composer. The LLM work runs on DeepSeek
+  (default), Gemini, or Claude — switchable in the admin panel. See
   [clipcast-backend/README.md](clipcast-backend/README.md).
 
 ## Getting started
@@ -67,19 +70,22 @@ cloud, even in development.
 | Background job dashboard (Inngest) | http://localhost:8288 |
 | Video processing backend | runs on Modal's cloud, not on your machine |
 
-## Test accounts
+## Test account
 
-The database was reset to exactly these two accounts, ready for hands-on
-testing (sign in at `/login`):
+Testing is done through a single seeded test user, exercising the real pipeline
+end to end (upload/URL → Inngest → Modal → credits → queue) rather than any
+direct-Modal harness. Create or top it up with:
 
-| Role | Email | Password |
-|---|---|---|
-| Admin (`/admin`) | `admin@clipcast.dev` | `ClipCast2026!` |
-| Regular user | `user@clipcast.dev` | `ClipCast2026!` |
+```bash
+cd clipcast-frontend && npx tsx prisma/seed-test-user.ts
+```
 
-Both start with credits already loaded (100 for the admin, 10 for the user),
-so you can submit a job right away. The S3 bucket was also emptied, so the
-first upload/clip you generate will be the only thing in it.
+That upserts `tester@clipcast.local` / `Tester@1234` with 1000 credits (override
+via `TEST_USER_EMAIL` / `TEST_USER_PASSWORD` / `TEST_USER_CREDITS`). Sign in at
+`/login` with that email + password (or the "sign in with a code" email-OTP
+flow), then submit audio or clip jobs. The seeded user is a regular `USER`; to
+reach `/admin`, promote an account's `role` to `ADMIN` (via Prisma Studio,
+`npm run db:studio`, or another admin).
 
 ## Learn how it all works
 

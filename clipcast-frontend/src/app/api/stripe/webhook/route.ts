@@ -1,4 +1,14 @@
-// stripe listen --forward-to localhost:3000/api/webhooks/stripe
+/**
+ * Stripe webhook receiver.
+ *
+ * Stripe calls this after a hosted-checkout payment. We must verify the
+ * `stripe-signature` header against our webhook secret (below) before trusting
+ * the payload — otherwise anyone could POST a fake "payment succeeded" event
+ * and mint free credits. On a verified checkout.session.completed we map the
+ * purchased price to a credit pack and grant credits atomically.
+ *
+ * Local testing: stripe listen --forward-to localhost:3000/api/webhooks/stripe
+ */
 
 import { NextResponse } from "next/server";
 import Stripe from "stripe";

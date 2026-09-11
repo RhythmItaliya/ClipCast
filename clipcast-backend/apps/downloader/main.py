@@ -61,10 +61,11 @@ PROXY_MAX_AGE_SECONDS = 60 * 60  # schedule refreshes every 15 min
 # (MAX_POLL_ATTEMPTS in src/inngest/functions.ts) raised to match.
 OVERALL_DEADLINE_SECONDS = 3600
 
-# Same markers yt-dlp-proxy uses to decide a proxy is burnt (execute_yt_dlp_command),
-# plus common transport failures.
+# Markers that indicate a proxy is burnt/blocked (transport/network failures).
+# NOTE: "Sign in to" is intentionally NOT here — it's a YouTube auth/fingerprint
+# issue that rotating proxies cannot fix. It is handled separately by the iOS
+# player client and optional cookie auth.
 PROXY_FAILURE_MARKERS = (
-    "Sign in to",
     "403",
     "video is available in",
     "Unable to connect to proxy",
@@ -159,12 +160,26 @@ def _load_free_proxies() -> list[str]:
     return urls
 
 
+def _build_cookies_args(tmp_dir: pathlib.Path) -> list[str]:
+    """If YT_DLP_COOKIES is set in the environment, write it to a temp file
+    and return ["--cookies", "<path>"]. Returns [] if no cookies configured.
+    The cookie content should be a Netscape-format cookies.txt exported from
+    a browser that is signed in to YouTube."""
+    cookies_content = os.environ.get("YT_DLP_COOKIES", "").strip()
+    if not cookies_content:
+        return []
+    cookies_path = tmp_dir / "yt_cookies.txt"
+    cookies_path.write_text(cookies_content)
+    return ["--cookies", str(cookies_path)]
+
+
 def _run_yt_dlp(
     url: str,
     output_template: pathlib.Path,
     proxy: str,
     timeout: float,
     audio_only: bool = False,
+    cookies_args: list[str] | None = None,
 ):
     command = [
         sys.executable,
@@ -180,6 +195,16 @@ def _run_yt_dlp(
         "--concurrent-fragments", "4",
         "--sleep-requests", "1",
     ]
+    # Player client depends on whether we're signed in (cookies present):
+    #  • With cookies -> use yt-dlp's default (web) clients, which serve the full
+    #    quality ladder (720p+). The ios/mweb clients would cap us at ~360p
+    #    because their higher formats need a GVS PO Token.
+    #  • Without cookies -> force ios,mweb, which does NOT trigger "Sign in to
+    #    confirm you're not a bot" for most videos (at 360p).
+    if cookies_args:
+        command += cookies_args
+    else:
+        command += ["--extractor-args", "youtube:player_client=ios,mweb"]
     if audio_only:
         # Grab the best audio-only stream in its native container (no re-encode,
         # no video, no merge) — the mixer re-extracts to 44.1 kHz wav anyway.
@@ -191,14 +216,41 @@ def _run_yt_dlp(
             "--merge-output-format", "mp4",
             "--remux-video", "mp4",
         ]
-    command += ["-o", str(output_template), url]
+    # Also write the info JSON so the caller can read the "most replayed"
+    # heatmap + title/uploader for the Song Research step (docs/19). Best-effort:
+    # if it's absent the pipeline falls back to energy-based hook detection.
+    command += ["--write-info-json", "-o", str(output_template), url]
     return subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+
+
+def _read_source_metadata(base_dir: pathlib.Path) -> dict:
+    """Pull title / uploader / the most-replayed heatmap out of yt-dlp's
+    info JSON. Returns {} on any problem — this is enrichment, never required."""
+    import json
+
+    infos = list(base_dir.glob("source.info.json"))
+    if not infos:
+        return {}
+    try:
+        info = json.loads(infos[0].read_text())
+    except Exception:  # noqa: BLE001
+        return {}
+    heatmap = info.get("heatmap")
+    return {
+        "title": info.get("title"),
+        "uploader": info.get("uploader") or info.get("channel"),
+        # list of {start_time, end_time, value}; the mixer picks the hottest run.
+        "heatmap": heatmap if isinstance(heatmap, list) else None,
+    }
 
 
 def _finished_files(base_dir: pathlib.Path) -> list[pathlib.Path]:
     return [
         path for path in base_dir.glob("source.*")
+        # Exclude yt-dlp's sidecars — partials and the info JSON (docs/19) — so
+        # only the real media file is considered the download.
         if path.suffix not in {".part", ".ytdl"}
+        and not path.name.endswith(".info.json")
     ]
 
 
@@ -221,21 +273,31 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str, audio_only: boo
     deadline = time.monotonic() + OVERALL_DEADLINE_SECONDS
 
     paid_proxy = os.environ.get("YT_DLP_PROXY", "").strip()
+    # Build cookies args once — written to a temp file inside base_dir so the
+    # file lives for the full download lifetime and is cleaned up with base_dir.
+    cookies_args = _build_cookies_args(base_dir)
+    if cookies_args:
+        print("Cookie auth enabled (YT_DLP_COOKIES is set)")
 
     try:
+        # Proxy order: try the paid residential proxy first (if configured),
+        # then fall back to the ranked free proxies. So a paid-proxy hiccup
+        # doesn't fail the whole job, and a paid-only deploy (empty free list)
+        # still just uses the paid one.
+        proxies = []
         if paid_proxy:
-            proxies = [paid_proxy]
-        else:
-            proxies = _load_free_proxies()
-            if not proxies:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=(
-                        "The free-proxy list isn't ready yet (it refreshes every "
-                        "15 minutes). Retry in a few minutes, or set YT_DLP_PROXY "
-                        "to a residential proxy for reliability."
-                    ),
-                )
+            proxies.append(paid_proxy)
+        proxies.extend(_load_free_proxies())
+        if not proxies:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "No proxies available: the free-proxy list isn't ready yet "
+                    "(it refreshes every 15 minutes) and YT_DLP_PROXY isn't set. "
+                    "Retry in a few minutes, or set YT_DLP_PROXY to a residential "
+                    "proxy for reliability."
+                ),
+            )
 
         last_error = "Unknown yt-dlp failure"
         attempt = 0
@@ -247,11 +309,11 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str, audio_only: boo
                 last_error = f"Timed out after {attempt - 1} proxy attempts: {last_error}"
                 break
 
-            print(f"Attempt {attempt}: downloading via proxy #{attempt}")
+            print(f"Attempt {attempt}: downloading via proxy #{attempt} (ios+mweb player clients)")
             try:
                 result = _run_yt_dlp(
                     youtube_url, output_template, proxy, timeout=remaining,
-                    audio_only=audio_only,
+                    audio_only=audio_only, cookies_args=cookies_args,
                 )
             except subprocess.TimeoutExpired:
                 last_error = "Download timed out through the proxy."
@@ -336,6 +398,9 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str, audio_only: boo
             "s3_key": s3_key,
             "duration": duration,
             "source_bytes": source_path.stat().st_size,
+            # Song Research (docs/19): title/uploader + most-replayed heatmap for
+            # real-lyrics lookup + viral-moment hook selection. Best-effort.
+            **_read_source_metadata(base_dir),
         }
     finally:
         shutil.rmtree(base_dir, ignore_errors=True)

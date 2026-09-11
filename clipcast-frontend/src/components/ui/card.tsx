@@ -1,3 +1,5 @@
+// shadcn/ui Card and its composable sub-parts (header, title, description, content, footer, action).
+
 import * as React from "react";
 
 import { cn } from "~/lib/utils";

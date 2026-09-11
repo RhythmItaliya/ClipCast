@@ -24,6 +24,17 @@ presign needed; Modal's downloader will write the source itself), and sends
 the same Inngest event with a `youtubeUrl` instead of relying on a pre-uploaded
 S3 key.
 
+## Path C: Audio Studio jobs
+
+Audio Studio submissions (`src/actions/audio.ts`: `createGeneratedTrack`,
+`createMashup`, `createAdvancedMix`) create an `UploadedFile` with
+`jobType: "audio"` and an `audioMode` of `generate` or `mashup`, then send a
+**separate** `"process-audio-events"` Inngest event handled by `processAudioFn`.
+The two pipelines never cross: `processVideoFn` rejects an audio job and
+`processAudioFn` rejects a clip job (each guards on `jobType`), so retrying a
+job always re-runs its own pipeline. See
+[14-audio-studio-mode.md](14-audio-studio-mode.md).
+
 ## Server-side usage limits
 
 `checkUsageLimits()` / `getUsageStats()` (`src/server/usage.ts`), constants in
@@ -33,6 +44,11 @@ S3 key.
   rolling 24h.
 - `MAX_ACTIVE_JOBS` (2): counts rows currently `queued`/`processing`.
 - `MIN_CREDITS_TO_SUBMIT` (1): credits must be positive to start any job.
+
+The active-job cap is also enforced by `checkConcurrencyLimit()` in
+`src/server/concurrency.ts` (`MAX_CONCURRENT_JOBS = 2`), shared across **audio
+and clip jobs combined** — both run on the same Modal backends, so one user
+can't saturate the GPU workers.
 
 ## The Inngest function: `processVideoFn`
 
@@ -74,15 +90,19 @@ function:
 interval: 10s while a job is young, 30s once it's been processing a while (GPU
 rendering is slow, no need to hammer the DB).
 
-## The daily YouTube auto-clip cron: partially built
+## The daily YouTube auto-clip cron
 
 `dailyClipScheduler` (`src/inngest/functions.ts`, `cron: "0 9 * * *"`) finds
-every user with a connected YouTube channel and non-zero credits. **As of this
-writing it only logs those users** and does not yet call the YouTube Data API
-for their latest video or fire a processing event (see the `NOTE`/`Future`
-comments in that function). The channel-connect OAuth plumbing
-(`src/actions/youtube.ts`, `/dashboard/youtube` UI) is complete; wiring this
-cron up to actually submit a job is the remaining piece.
+every user who has **opted in** (`youtubeAutoClip: true`), has a connected
+YouTube channel, and non-zero credits. For each, it fetches their latest upload
+via the YouTube Data API, skips it if a job for that URL already exists (the
+URL check makes every run idempotent), then creates an `UploadedFile` and fires
+a `process-video-events` job in `highlights` mode. The opt-in toggle lives on
+the YouTube page (`/dashboard/youtube`, `setYouTubeAutoClip`, reset on
+disconnect); the channel-connect OAuth plumbing is in `src/actions/youtube.ts`.
+A companion
+`weeklySummaryScheduler` (`cron: "0 9 * * 1"`) sends the weekly usage email
+(doc 11). Both are registered in `src/app/api/inngest/route.ts`.
 
 ## How to build it from scratch
 
@@ -123,8 +143,10 @@ Next.js server is never in that data path.
 ```ts
 // src/lib/limits.ts
 export const LIMITS = {
-  MAX_FILE_SIZE_BYTES: 500 * 1024 * 1024,
+  MAX_FILE_SIZE_BYTES: 4 * 1024 * 1024 * 1024, // 4GB
   ALLOWED_EXTENSIONS: ["mp4"],
+  ALLOWED_CONTENT_TYPES: ["video/mp4"],
+  MAX_DURATION_MINUTES: 240,
   MAX_UPLOADS_PER_DAY: 10,
   MAX_ACTIVE_JOBS: 2,
   MIN_CREDITS_TO_SUBMIT: 1,

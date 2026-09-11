@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * Live-polled dashboard usage widgets: the hero "credits left" pill and the
+ * "videos today / running jobs" stat tiles. Each reads a single slice of the
+ * shared queue-status poll so an unrelated update doesn't re-render the others.
+ */
+
 import { Activity, Coins, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { memo, type ReactNode } from "react";
@@ -20,6 +26,7 @@ export function CreditsLeftLink() {
   );
 }
 
+/** The two live stat tiles; each subscribes to its own queue-status slice. */
 export function UsageStatTiles() {
   const { data: uploadsToday = 0 } = useQueueStatus((d) => d.uploadsToday);
   const { data: activeJobs = 0 } = useQueueStatus((d) => d.activeJobs);
@@ -41,6 +48,8 @@ export function UsageStatTiles() {
   );
 }
 
+// memo'd so tiles only repaint when their own value/hint change, not on every
+// poll tick that leaves the numbers untouched.
 const StatTile = memo(function StatTile({
   icon,
   label,

@@ -4,6 +4,12 @@ import { db } from "~/server/db";
 import { QUEUE_FILE_SELECT, toQueueFile } from "~/server/queue";
 import { getUsageStats } from "~/server/usage";
 
+/**
+ * GET /api/queue-status
+ * Polling endpoint the dashboard hits on an interval to refresh the current
+ * user's job queue plus live usage stats (credits, uploads today, active jobs)
+ * without a full page reload.
+ */
 export async function GET() {
   const session = await auth();
 

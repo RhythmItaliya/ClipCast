@@ -1,3 +1,7 @@
+/**
+ * 404 page (Next.js `not-found.tsx`) — branded fallback for unmatched routes
+ * and explicit `notFound()` calls.
+ */
 import Link from "next/link";
 import { LogoMark, Wordmark } from "~/components/brand";
 import { Button } from "~/components/ui/button";

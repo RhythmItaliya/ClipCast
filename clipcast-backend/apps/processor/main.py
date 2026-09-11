@@ -18,6 +18,7 @@ from captions import (
     build_caption_subs,
     parse_hex_color,
 )
+from clip_crew import plan_clip_presentation
 
 try:
     import ffmpegcv
@@ -51,6 +52,20 @@ class ProcessVideoRequest(BaseModel):
     # The user's own watermark text. None/empty means NO watermark at all —
     # nothing is hardcoded.
     watermark_text: str | None = None
+    # Which LLM drives the AI crew (Colorist etc.): "deepseek" (default) |
+    # "gemini" | "claude" | "openai". Set from the admin AI-provider setting,
+    # per job.
+    llm_provider: str | None = None
+    # The admin's own API key for the chosen provider, sent per job. It is
+    # stored encrypted in the app DB and overrides the Modal secret for that
+    # provider. None means "use the key from the Modal secret instead".
+    llm_api_key: str | None = None
+    # More per-provider config from the admin panel, sent per job (all optional):
+    # the model id, the Anthropic effort (Claude only), and a custom base URL so
+    # the provider can point at a compatible gateway. None → backend defaults.
+    llm_model: str | None = None
+    llm_effort: str | None = None
+    llm_base_url: str | None = None
 
 
 CLIP_MODE_PROMPTS = {
@@ -197,6 +212,20 @@ MODE_CATEGORY_LABELS = {
 # every mode.
 MIN_CLIP_SECONDS = 15.0
 
+# Ask the model to rank each moment for short-form virality + give a hook, so we
+# keep the STRONGEST candidates when there are more than we render (idea borrowed
+# from AutoShorts). Appended to every mode's prompt.
+VIRAL_SCORING = (
+    '\nFor EACH moment additionally include: "viral_score" (integer 0-100 — how '
+    "likely this exact clip is to go viral as a short: hook strength, emotion, "
+    'surprise, and a satisfying payoff) and "hook" (a punchy <=8-word opening '
+    "line to grab attention). Keep the JSON parseable.\n"
+)
+
+# How many clips a job renders (was an inline literal). Candidates beyond this
+# are dropped after ranking by viral_score.
+MAX_CLIPS_PER_JOB = 12
+
 # Auto-theme the active-word caption highlight by the clip's mood/category when
 # the user hasn't picked their own color. Keyed first on the fixed mode labels,
 # then on keywords for the AI-invented "any"-mode tags.
@@ -229,6 +258,24 @@ def _category_highlight_hex(category):
         if any(k in c for k in keywords):
             return hex_color
     return None
+
+
+def _rgb_to_hex(rgb):
+    """[r, g, b] → '#RRGGBB'."""
+    r, g, b = (max(0, min(255, int(v))) for v in rgb)
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+
+def _clip_transcript_snippet(transcript_segments, start, end, max_chars=400):
+    """The words spoken inside a clip's window — context for the Colorist to
+    read the clip's emotion from."""
+    words = [
+        s.get("word", "")
+        for s in transcript_segments
+        if s.get("start") is not None and s.get("end") is not None
+        and s["end"] > start and s["start"] < end
+    ]
+    return " ".join(w for w in words if w).strip()[:max_chars]
 
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.0-devel-ubuntu22.04", add_python="3.11")
@@ -282,7 +329,9 @@ image = (
     # Caption ASS generation lives in its own module so the render-test
     # harness (scripts/render_caption_test.py) can exercise the exact
     # production code on a cheap CPU container.
-    .add_local_python_source("captions")
+    .add_local_python_source(
+        "captions", "crew", "clip_crew", "monitoring", "llm_providers"
+    )
 )
 
 app = modal.App("clipcast", image=image)
@@ -815,6 +864,24 @@ class ClipCast:
         self.gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         print("Created gemini client...")
 
+    def _make_llm(self, provider=None, api_key=None, model=None, effort=None, base_url=None):
+        """Build the crew LLM for the chosen provider.
+
+        provider: which LLM to use — "deepseek" (default), "gemini", "claude"
+                  or "openai". Chosen by the admin and sent per job.
+        api_key/model/effort/base_url: the admin's per-provider config for that
+                  provider (from the encrypted DB). Each overrides the backend
+                  default; None → use the default. `effort` is Claude-only.
+        Falls back across configured providers; None → the crew runs on its
+        deterministic (non-AI) fallbacks."""
+        # Pass the warm Gemini client so the "gemini" path can reuse it.
+        from llm_providers import make_llm
+
+        return make_llm(
+            provider, getattr(self, "gemini_client", None), api_key,
+            model=model, effort=effort, base_url=base_url,
+        )
+
     def _get_hf_fallback(self):
         """Lazily load the HF fallback model on first use only.
 
@@ -910,7 +977,7 @@ class ClipCast:
             sources: list[str] = []
 
             for chunk_index, chunk in enumerate(chunks):
-                chunk_prompt = prompt + json.dumps(chunk)
+                chunk_prompt = prompt + VIRAL_SCORING + json.dumps(chunk)
                 moments = None
                 source = "none"
 
@@ -1242,14 +1309,26 @@ class ClipCast:
                 continue
             title = str(moment.get("title", "") or "").strip()[:80]
             category = str(moment.get("category") or "").strip()[:40] or None
-            valid_moments.append({"start": start, "end": end, "title": title, "category": category})
-            if len(valid_moments) == 12:
-                break
+            try:
+                viral_score = max(0, min(100, int(moment.get("viral_score") or 0)))
+            except (TypeError, ValueError):
+                viral_score = 0
+            hook = str(moment.get("hook") or "").strip()[:80]
+            valid_moments.append({
+                "start": start, "end": end, "title": title,
+                "category": category, "viral_score": viral_score, "hook": hook,
+            })
+
+        # Rank by viral potential and keep the strongest — so when the transcript
+        # yields more candidates than we render, we ship the best, not the first.
+        valid_moments.sort(key=lambda m: m["viral_score"], reverse=True)
+        valid_moments = valid_moments[:MAX_CLIPS_PER_JOB]
 
         # ── Render clips ─────────────────────────────────────────────────────
         clips_rendered = 0
         clip_records = []
         clip_errors = []
+        production_log = []  # the clip crew's decision transcript (docs/17 §6)
         for index, moment in enumerate(valid_moments):
             print(f"Processing clip {index} ({'PREVIEW' if request.preview_only else 'FULL'}) "
                   f"from {moment['start']} to {moment['end']}")
@@ -1261,11 +1340,30 @@ class ClipCast:
                         watermark_text=request.watermark_text,
                     )
                 else:
-                    # User's own color wins; otherwise auto-theme the highlight
-                    # by the clip's mood/category (None → brand default).
-                    effective_caption_color = request.caption_color or _category_highlight_hex(
-                        moment.get("category")
-                    )
+                    # User's own color always wins. Otherwise the Colorist agent
+                    # (docs/17 §3b) decides the highlight RGB dynamically from the
+                    # clip's emotion; the category map is only its fallback.
+                    if request.caption_color:
+                        effective_caption_color = request.caption_color
+                    else:
+                        fallback_hex = _category_highlight_hex(moment.get("category")) or "#6366F1"
+                        pres, clip_log = plan_clip_presentation(
+                            self._make_llm(
+                                request.llm_provider, request.llm_api_key,
+                                request.llm_model, request.llm_effort,
+                                request.llm_base_url,
+                            ),
+                            {
+                                "title": moment["title"],
+                                "category": moment.get("category"),
+                                "transcript": _clip_transcript_snippet(
+                                    transcript_segments, moment["start"], moment["end"]
+                                ),
+                                "fallback_rgb": list(parse_hex_color(fallback_hex)),
+                            },
+                        )
+                        effective_caption_color = _rgb_to_hex(pres["rgb"])
+                        production_log.extend({**e, "clip": index} for e in clip_log)
                     record = process_clip(
                         base_dir, video_path, request.s3_key,
                         moment["start"], moment["end"], index, transcript_segments, moment["title"],
@@ -1319,6 +1417,11 @@ class ClipCast:
             "TalkNet ASD (speaker detection)" if not request.preview_only
             else "TalkNet ASD skipped (preview mode)"
         )
+        scores = [m["viral_score"] for m in valid_moments if m.get("viral_score")]
+        if scores:
+            processing_summary_parts.append(
+                f"viral-ranked (top {max(scores)}, low {min(scores)}/100)"
+            )
         processing_summary = " · ".join(processing_summary_parts)
 
         return {
@@ -1328,6 +1431,7 @@ class ClipCast:
             "clips_rendered": clips_rendered,
             "clips": clip_records,
             "processing_summary": processing_summary,
+            "production_log": production_log,
             **({"clip_warnings": clip_errors} if clip_errors else {}),
         }
 

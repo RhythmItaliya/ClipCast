@@ -1,0 +1,54 @@
+{
+  "harness": "e2e_full_pipeline",
+  "started_at_utc": "2026-09-11T14:16:04.557798+00:00",
+  "finished_at_utc": "2026-09-11T14:18:55.493153+00:00",
+  "total_seconds": 170.9,
+  "overall_status": "PASS",
+  "args": {
+    "url": "https://www.youtube.com/watch?v=arj7oStGLkU",
+    "mode": "all",
+    "preview": false,
+    "audio": false,
+    "audio_only": true,
+    "audio_prompt": "upbeat lofi hip hop instrumental, mellow, jazzy keys, relaxed study vibe",
+    "llm_provider": "claude",
+    "s3_key": null,
+    "timeout": 2700,
+    "no_presign": false
+  },
+  "environment": {
+    "local_download_endpoint": "http://localhost:3000/api/local-download",
+    "process_video_endpoint": "https://littlemovie00--clipcast-clipcast-process-video.modal.run",
+    "process_audio_endpoint": "https://littlemovie00--clipcast-mixer-process-audio.modal.run",
+    "s3_bucket": "my-video-storage-app-281414549138-us-west-2-an",
+    "aws_region": "us-west-2",
+    "boto3_available": true,
+    "python": "3.12.3"
+  },
+  "llm": {
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "medium",
+    "base_url_set": true,
+    "api_key_source": "ANTHROPIC_API_KEY"
+  },
+  "stages": [
+    {
+      "name": "audio_generate",
+      "status": "PASS",
+      "seconds": 170.8,
+      "detail": "s3_key=audio/e2e-c10a3172-b4ac-4e4c-808d-a4441019f385/master.mp3, duration=19.94",
+      "error": ""
+    }
+  ],
+  "clips": [],
+  "audio": {
+    "s3_key": "audio/e2e-c10a3172-b4ac-4e4c-808d-a4441019f385/master.mp3",
+    "wav_s3_key": "audio/e2e-c10a3172-b4ac-4e4c-808d-a4441019f385/master.wav",
+    "duration": 19.94,
+    "title": "Generated track",
+    "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/audio/e2e-c10a3172-b4ac-4e4c-808d-a4441019f385/master.mp3?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=lhhrbqRZpqirUcL7%2F7dxLRZ%2BLDA%3D&Expires=1789139935",
+    "processing_summary": "MusicGen medium \u00b7 AI composer prompt: An upbeat, mellow lo-fi hip hop instrumental featuring jazzy Rhodes chords, warm bass, and dusty boom-bap drums, maintaining a relaxed, stea \u00b7 Audiobox PQ 7.3/10"
+  },
+  "bugs": []
+}

@@ -219,6 +219,10 @@ model UploadedFile {
   // chunk(s) (moments), HF fallback Qwen/Qwen2.5-7B-Instruct 1/9 · TalkNet
   // ASD (speaker detection)"). Built in clipcast-backend/apps/processor.
   processingSummary   String?
+  // The multi-agent production crew's decision transcript (docs/17): an ordered
+  // list of {round, from, to, choices, rationale, note} entries rendered in the
+  // "Production Room". Null for jobs that ran before the crew existed.
+  productionLog       Json?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -277,4 +281,25 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+/// Global admin-managed key/value settings (e.g. the active LLM provider for
+/// the AI crew). One row per key; read on job submission, edited in admin.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+/// Encrypted per-provider LLM API keys, managed from the admin AI Providers
+/// page. Stored with AES-256-GCM (ciphertext/iv/authTag); plaintext is never
+/// persisted or returned to the client. `last4` is kept for display only. The
+/// active provider's key is decrypted at job dispatch and passed to Modal.
+model ProviderKey {
+  provider   String   @id // deepseek | gemini | claude | openai
+  ciphertext String
+  iv         String
+  authTag    String
+  last4      String?
+  updatedAt  DateTime @updatedAt
 }
