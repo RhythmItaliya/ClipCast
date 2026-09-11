@@ -1,0 +1,223 @@
+{
+  "kind": "page-smoke",
+  "generated": "2026-09-11T16:08:19.487943+00:00",
+  "base_url": "http://localhost:3000",
+  "admin": "admin@clipcast.local",
+  "login_ok": true,
+  "summary": {
+    "tested": 20,
+    "passed": 20,
+    "failed": 0,
+    "skipped": 1,
+    "overall": "PASS"
+  },
+  "routes": [
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/dashboard",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/login"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/dashboard",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/signup"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/dashboard",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/dashboard"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/dashboard/queue",
+      "title": "Queue \u2014 ClipCast",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/dashboard/queue"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/dashboard/clips",
+      "title": "Library \u2014 ClipCast",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/dashboard/clips"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/dashboard/audio",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/dashboard/audio"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/dashboard/youtube",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/dashboard/youtube"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/dashboard/billing",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/dashboard/billing"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/dashboard/settings",
+      "title": "Settings \u2014 ClipCast",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/dashboard/settings"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/admin",
+      "screenshot": "/home/rhythm/Documents/ClipCast/testing/reports/smoke-20260911T160546Z/admin.png"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin/jobs",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/admin/jobs"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin/users",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/admin/users"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin/clips",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/admin/clips"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin/billing",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/admin/billing"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin/audit",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/admin/audit"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin/providers",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/admin/providers"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin/health",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "/admin/health"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin/jobs/cmszkf1v00001jqx862qc62ee",
+      "title": "Job detail \u2014 Admin",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "admin/jobs/[id]  (/admin/jobs/cmszkf1v00001jqx862qc62ee)"
+    },
+    {
+      "status": 200,
+      "error_boundary": false,
+      "final_url": "//localhost:3000/admin/users/cmtwx01vm0001jqtoo59t1p7v",
+      "title": "ClipCast \u2014 AI Podcast Clipper",
+      "console_errors": [],
+      "page_errors": [],
+      "ok": true,
+      "route": "admin/users/[id]  (/admin/users/cmtwx01vm0001jqtoo59t1p7v)"
+    },
+    {
+      "route": "dashboard/production/[id]",
+      "ok": true,
+      "skipped": true,
+      "status": null
+    }
+  ]
+}

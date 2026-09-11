@@ -82,7 +82,8 @@ Gemini moment-selection returns ~15–30s spans though the prompt asks for "30�
   ! cd clipcast-frontend && npx prisma db push --force-reset --accept-data-loss && npx tsx prisma/seed.ts
   ```
   The seed already ran (upsert) so the accounts + provider exist on the current DB; the pipeline tests above don't depend on a wipe.
-- **App-flow / credits UI test** (client logs in → submits a job → credits deducted → queue): not automated (no browser driver installed). Best done manually via the seeded client, or add Playwright.
+- **Page-render smoke test**: ✅ now automated — `testing/page_smoke.py` (Playwright) logs in as admin and asserts every route renders (no 5xx / error boundary). Added after it caught nothing guarding the `/admin` 500 (`connection_limit=1` pool exhaustion, fixed in `.env`). All 20 routes PASS.
+- **App-flow / credits UI test** (client logs in → submits a job → credits deducted → queue): still not automated — `page_smoke.py` verifies pages *render*, not the submit→credit-deduct flow. Best done manually via the seeded client, or extend `page_smoke.py`.
 - **Backend redeploys** for Bug A / F1: can't be applied here (no `modal` CLI).
 
 ---

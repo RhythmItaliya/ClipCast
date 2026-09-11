@@ -1,5 +1,46 @@
 # ClipCast E2E Test Harness
 
+Two complementary harnesses live here:
+
+- **`page_smoke.py`** — app-side. Logs in as the seeded admin in a real browser
+  (Playwright) and visits **every** route, failing on any 500 / error boundary.
+  Fast, free, no Modal. See **Page smoke test** below.
+- **`e2e_full_pipeline.py`** — backend-side. Drives the real Modal pipeline
+  (download → processor → clips → audio). Real GPU + money.
+
+---
+
+## Page smoke test (`page_smoke.py`)
+
+The complement to `e2e_full_pipeline.py`: that harness only exercises the Modal
+backend, so a Next.js page that 500s renders nothing to it. `page_smoke.py`
+covers that gap — it logs in as the seeded **admin** and asserts every app route
+renders (no 5xx, no `error.tsx` boundary).
+
+> Born from a real bug: `/admin` was throwing a 500 because `DATABASE_URL` had
+> `connection_limit=1`, so the admin overview's `Promise.all` fan-out of 6+
+> server-component queries exhausted the single pooled connection and tripped
+> `pool_timeout`. Nothing tested page rendering, so nothing caught it. This does.
+
+```bash
+# Prereqs: dev server up (npm run dev) + DB seeded (npx tsx prisma/seed.ts)
+python3 testing/page_smoke.py            # headless, localhost:3000
+python3 testing/page_smoke.py --headed   # watch it
+python3 testing/page_smoke.py --shots    # screenshot every page (else just /admin)
+```
+
+Covers all static routes plus the query-heavy dynamic `[id]` pages (first row of
+`/admin/jobs`, `/admin/users`, `/dashboard/production`; skipped, not failed, when
+a table is empty). Writes `testing/reports/smoke-<ts>/report.json` and a
+full-page `/admin` screenshot. Exit `0` only if every route passed. Uses
+`ADMIN_EMAIL` / `ADMIN_PASSWORD` from `.env` (defaults match the seed:
+`admin@clipcast.local` / `Admin@1234`). Playwright is already installed; if the
+`playwright` import fails, run it with `/usr/bin/python3`.
+
+---
+
+## Backend pipeline harness (`e2e_full_pipeline.py`)
+
 `e2e_full_pipeline.py` drives the **real** ClipCast pipeline end-to-end against
 the deployed Modal endpoints, and writes a machine-readable + human-readable
 report. It has two independent flows:
