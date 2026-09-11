@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * Account settings page (client). Composes the profile, clip-appearance,
+ * notification, and danger-zone sections. Each section calls a server action and
+ * reports success/failure with a toast; notification toggles apply optimistically.
+ */
+
 import { Bell, Loader2, Mail, Paintbrush, Trash2, User } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";

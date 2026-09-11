@@ -1,6 +1,9 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+// Shared, presentational building blocks for the login/signup forms. Marked
+// "use client" because they carry interactive handlers (onClick, refs) used by
+// the client-side auth forms.
+import { Loader2 } from "lucide-react"; // spinner shown on in-flight buttons
 import { forwardRef, type InputHTMLAttributes, type ReactNode } from "react";
 import { DiscordIcon, GoogleIcon } from "~/components/brand";
 
@@ -11,6 +14,11 @@ type AuthInputProps = InputHTMLAttributes<HTMLInputElement> & {
   error?: string;
 };
 
+/**
+ * Labelled text input with optional leading icon and inline error text.
+ * forwardRef so the parent form can register the underlying <input> (e.g. with
+ * react-hook-form) and focus it directly.
+ */
 export const AuthInput = forwardRef<HTMLInputElement, AuthInputProps>(
   function AuthInput({ label, hint, icon, error, className = "", ...rest }, ref) {
     return (

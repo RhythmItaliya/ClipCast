@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * Billing page credit-pack tiers. Renders the three one-time credit packs and,
+ * on click, opens Stripe Checkout via the createCheckoutSession server action.
+ * Client component: buying is interactive (per-tier loading state + toasts).
+ */
+
 import { Check, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";

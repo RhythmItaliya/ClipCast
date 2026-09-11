@@ -4,6 +4,12 @@ import { env } from "~/env";
 import { inngest } from "./client";
 import { creditsForAudio, creditsForDuration } from "~/lib/credits";
 import { db } from "~/server/db";
+import { getProviderConfig } from "~/server/provider-keys";
+import {
+  DEFAULT_LLM_PROVIDER,
+  LLM_PROVIDERS,
+  type LlmProvider,
+} from "~/lib/llm-providers";
 import {
   clipReadyEmailHtml,
   jobFailedEmailHtml,
@@ -31,6 +37,33 @@ class JobProcessingError extends Error {
 
 const GENERIC_FRIENDLY_ERROR =
   "Something went wrong while processing your video. Please try again, and contact support if it keeps happening.";
+
+/**
+ * Normalize a raw provider string from the job event to a valid provider and
+ * its stored (decrypted) config — API key, model, effort, base URL — if the
+ * admin set them in the UI. These are sent to Modal per-job and override the
+ * backend default for that provider; `null` means fall back to the default.
+ * Kept out of the Inngest event payload — resolved here at dispatch instead.
+ */
+async function resolveLlmConfig(raw: string | undefined): Promise<{
+  provider: LlmProvider;
+  apiKey: string | null;
+  model: string | null;
+  effort: string | null;
+  baseUrl: string | null;
+}> {
+  const provider = (LLM_PROVIDERS as readonly string[]).includes(raw ?? "")
+    ? (raw as LlmProvider)
+    : DEFAULT_LLM_PROVIDER;
+  const cfg = await getProviderConfig(provider);
+  return {
+    provider,
+    apiKey: cfg?.apiKey?.trim() ? cfg.apiKey : null,
+    model: cfg?.model ?? null,
+    effort: cfg?.effort ?? null,
+    baseUrl: cfg?.baseUrl ?? null,
+  };
+}
 
 let s3Client: S3Client | null = null;
 
@@ -104,6 +137,15 @@ export const processVideoFn = inngest.createFunction(
       (event.data as { previewOnly?: boolean }).previewOnly ?? false;
     const llmProvider =
       (event.data as { llmProvider?: string }).llmProvider ?? "deepseek";
+    // Decrypt the admin-configured provider config (key + model + effort + base
+    // URL, any of which may be null) and pass it to Modal below; each overrides
+    // the backend default, null falls back to it.
+    const {
+      apiKey: llmApiKey,
+      model: llmModel,
+      effort: llmEffort,
+      baseUrl: llmBaseUrl,
+    } = await resolveLlmConfig(llmProvider);
 
     try {
       const { userId, credits, s3Key, captionColor, watermarkText, jobType } =
@@ -236,6 +278,29 @@ export const processVideoFn = inngest.createFunction(
             );
           }
 
+          // TEMP — local yt-dlp fallback. Try downloading on THIS machine when
+          // the cloud path can't get the video: a hard error (bot-detection /
+          // dead proxies) OR a timeout (never finished polling). Returns the
+          // result on success, null if no local endpoint is configured, and
+          // throws if the local attempt itself fails. Remove with the rest of
+          // the scaffolding once the proxy path is reliable.
+          const localDownloadFallback = async (
+            stepId: string,
+          ): Promise<CloudDownloaderResponse | null> => {
+            if (!env.LOCAL_DOWNLOAD_ENDPOINT) return null;
+            const local = await step.run(stepId, () =>
+              postLocalDownload({ youtube_url: youtubeUrl, s3_key: s3Key }),
+            );
+            if (local.httpStatus >= 200 && local.httpStatus < 300) {
+              return local.data;
+            }
+            throw new JobProcessingError(
+              DOWNLOAD_FAILED_FRIENDLY,
+              `Local fallback download failed (HTTP ${local.httpStatus}): ` +
+                local.body.slice(0, 600),
+            );
+          };
+
           // Step 1 — submit the download job (returns call_id immediately)
           const submitted = await step.run(
             "submit-youtube-download",
@@ -293,44 +358,16 @@ export const processVideoFn = inngest.createFunction(
                 (pollResult.data as { detail?: string }).detail ??
                 pollResult.body.slice(0, 600);
 
-              // TEMP — local yt-dlp fallback.
-              // When the Modal cloud downloader fails (e.g. YouTube bot
-              // detection blocks all proxies), fall back to downloading on
-              // this local dev machine via the /api/local-download route.
-              // Remove once Modal is fixed or a residential proxy is set.
-              if (env.LOCAL_DOWNLOAD_ENDPOINT) {
-                console.warn(
-                  `[inngest] Cloud download failed (${pollResult.httpStatus}), ` +
-                  `falling back to local yt-dlp: ${detail.slice(0, 200)}`,
-                );
-                const localResult = await step.run(
-                  "local-download-fallback",
-                  async () => {
-                    const res = await fetch(env.LOCAL_DOWNLOAD_ENDPOINT!, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        youtube_url: youtubeUrl,
-                        s3_key: s3Key,
-                      }),
-                      // Local machine — no cloud timeout worries; 30 min is generous.
-                      signal: AbortSignal.timeout(30 * 60 * 1000),
-                    });
-                    const text = await res.text();
-                    let data: CloudDownloaderResponse = {};
-                    try { data = JSON.parse(text) as CloudDownloaderResponse; } catch { /* raw */ }
-                    return { httpStatus: res.status, data, body: text };
-                  },
-                );
-                if (localResult.httpStatus >= 200 && localResult.httpStatus < 300) {
-                  downloadData = localResult.data;
-                  break;
-                }
-                throw new JobProcessingError(
-                  DOWNLOAD_FAILED_FRIENDLY,
-                  `Local fallback download also failed (HTTP ${localResult.httpStatus}): ` +
-                    localResult.body.slice(0, 600),
-                );
+              // Cloud download errored (e.g. YouTube bot-detection blocked all
+              // proxies) — try the local machine before giving up.
+              console.warn(
+                `[inngest] Cloud download failed (${pollResult.httpStatus}), ` +
+                  `trying local fallback: ${detail.slice(0, 200)}`,
+              );
+              const local = await localDownloadFallback("local-download-fallback");
+              if (local) {
+                downloadData = local;
+                break;
               }
 
               throw new JobProcessingError(
@@ -345,13 +382,20 @@ export const processVideoFn = inngest.createFunction(
           }
 
           if (!downloadData) {
-            throw new JobProcessingError(
-              "This video is taking longer than expected to download. It " +
-                "may be too long, or YouTube downloads are temporarily " +
-                "restricted. Please try again later.",
-              "Cloud download did not finish within 90 poll attempts (~85 min). " +
-                "The video may be too long or the proxy is blocked.",
-            );
+            // Cloud download never finished (stuck proxy / timed out) — give the
+            // local machine one last try before failing the job.
+            const local = await localDownloadFallback("local-download-timeout");
+            if (local) {
+              downloadData = local;
+            } else {
+              throw new JobProcessingError(
+                "This video is taking longer than expected to download. It " +
+                  "may be too long, or YouTube downloads are temporarily " +
+                  "restricted. Please try again later.",
+                "Cloud download did not finish within 90 poll attempts (~85 min). " +
+                  "The video may be too long or the proxy is blocked.",
+              );
+            }
           }
 
           if (downloadData.duration && downloadData.duration > 0) {
@@ -382,6 +426,12 @@ export const processVideoFn = inngest.createFunction(
             watermark_text: watermarkText,
             // AI-crew provider (Colorist etc.) — admin-selected, defaults deepseek.
             llm_provider: llmProvider ?? "deepseek",
+            // Admin-managed per-provider config (encrypted at rest); each field
+            // overrides the backend default, null → backend falls back to it.
+            llm_api_key: llmApiKey,
+            llm_model: llmModel,
+            llm_effort: llmEffort,
+            llm_base_url: llmBaseUrl,
           }),
           headers: {
             "Content-Type": "application/json",
@@ -746,6 +796,16 @@ export const processAudioFn = inngest.createFunction(
       prompt?: string;
     };
 
+    // Decrypt the admin-configured provider config for the active provider (key
+    // + model + effort + base URL). Merged into the mixer submit payload below
+    // so the music crew can use it.
+    const {
+      apiKey: llmApiKey,
+      model: llmModel,
+      effort: llmEffort,
+      baseUrl: llmBaseUrl,
+    } = await resolveLlmConfig(llmProvider);
+
     const AUDIO_GENERIC_ERROR =
       "Something went wrong while creating your audio. Please try again, and " +
       "contact support if it keeps happening.";
@@ -768,6 +828,37 @@ export const processAudioFn = inngest.createFunction(
     }> {
       // Audio jobs only need the audio track — bestaudio is far faster/smaller
       // than the full up-to-4K video download the clip pipeline uses.
+      // Shape a downloader response (cloud or local) into what callers expect.
+      const toResult = (data: CloudDownloaderResponse) => ({
+        duration: data.duration && data.duration > 0 ? data.duration : 0,
+        title: data.title ?? null,
+        uploader: data.uploader ?? null,
+        heatmap: data.heatmap ?? null,
+      });
+
+      // TEMP — local yt-dlp fallback (same idea as the clip path). Try the
+      // local machine when the cloud download errors OR times out. Returns the
+      // result on success, null if no local endpoint is set, throws on a local
+      // failure. Remove with the scaffolding once the proxy path is reliable.
+      const localAudioFallback = async (
+        stepId: string,
+      ): Promise<CloudDownloaderResponse | null> => {
+        if (!env.LOCAL_DOWNLOAD_ENDPOINT) return null;
+        const local = await step.run(stepId, () =>
+          postLocalDownload({
+            youtube_url: youtubeUrl,
+            s3_key: s3Key,
+            audio_only: true,
+          }),
+        );
+        if (local.httpStatus >= 200 && local.httpStatus < 300) return local.data;
+        throw new JobProcessingError(
+          DOWNLOAD_FAILED_FRIENDLY,
+          `Local fallback audio download failed (HTTP ${local.httpStatus}): ` +
+            local.body.slice(0, 600),
+        );
+      };
+
       const submitted = await step.run(`${prefix}-submit`, () =>
         postCloudDownloader({
           youtube_url: youtubeUrl,
@@ -793,55 +884,23 @@ export const processAudioFn = inngest.createFunction(
           continue;
         }
         if (poll.httpStatus < 200 || poll.httpStatus >= 300) {
-          // TEMP — local yt-dlp fallback (same logic as processVideoFn above).
-          // Remove once Modal is fixed or a residential proxy is configured.
-          if (env.LOCAL_DOWNLOAD_ENDPOINT) {
-            console.warn(
-              `[inngest] Audio cloud download failed (${poll.httpStatus}), ` +
-              `falling back to local yt-dlp`,
-            );
-            const localRes = await step.run(`${prefix}-local-fallback`, async () => {
-              const res = await fetch(env.LOCAL_DOWNLOAD_ENDPOINT!, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  youtube_url: youtubeUrl,
-                  s3_key: s3Key,
-                  audio_only: true,
-                }),
-                signal: AbortSignal.timeout(30 * 60 * 1000),
-              });
-              const text = await res.text();
-              let data: CloudDownloaderResponse = {};
-              try { data = JSON.parse(text) as CloudDownloaderResponse; } catch { /* raw */ }
-              return { httpStatus: res.status, data, body: text };
-            });
-            if (localRes.httpStatus >= 200 && localRes.httpStatus < 300) {
-              return {
-                duration: localRes.data.duration ?? 0,
-                title: localRes.data.title ?? null,
-                uploader: localRes.data.uploader ?? null,
-                heatmap: null,
-              };
-            }
-            throw new JobProcessingError(
-              DOWNLOAD_FAILED_FRIENDLY,
-              `Local fallback audio download failed (HTTP ${localRes.httpStatus}): ` +
-                localRes.body.slice(0, 600),
-            );
-          }
+          // Cloud download errored — try the local machine before giving up.
+          console.warn(
+            `[inngest] Audio cloud download failed (${poll.httpStatus}), ` +
+              `trying local fallback`,
+          );
+          const local = await localAudioFallback(`${prefix}-local-fallback`);
+          if (local) return toResult(local);
           throw new JobProcessingError(
             DOWNLOAD_FAILED_FRIENDLY,
             `Download failed (HTTP ${poll.httpStatus}): ${poll.body.slice(0, 600)}`,
           );
         }
-        return {
-          duration: poll.data.duration && poll.data.duration > 0 ? poll.data.duration : 0,
-          title: poll.data.title ?? null,
-          uploader: poll.data.uploader ?? null,
-          heatmap: poll.data.heatmap ?? null,
-        };
+        return toResult(poll.data);
       }
+      // Cloud download never finished (stuck proxy / timed out) — last local try.
+      const local = await localAudioFallback(`${prefix}-local-timeout`);
+      if (local) return toResult(local);
       throw new JobProcessingError(
         "This is taking longer than expected. One of the videos may be too " +
           "long, or YouTube downloads are temporarily restricted. Try again later.",
@@ -862,7 +921,13 @@ export const processAudioFn = inngest.createFunction(
         );
       }
       const submitted = await step.run(`${prefix}-submit`, () =>
-        postAudioMixer(payload),
+        postAudioMixer({
+          ...payload,
+          llm_api_key: llmApiKey,
+          llm_model: llmModel,
+          llm_effort: llmEffort,
+          llm_base_url: llmBaseUrl,
+        }),
       );
       const callId = submitted.data.call_id;
       if (submitted.httpStatus !== 202 || !callId) {
@@ -1514,6 +1579,36 @@ async function postCloudDownloader(payload: {
     data = JSON.parse(body) as CloudDownloaderResponse;
   } catch {
     // Preserve the raw body for the error reported to the job record.
+  }
+  return { httpStatus: response.status, data, body };
+}
+
+/**
+ * TEMP — local yt-dlp fallback transport. Calls the /api/local-download route
+ * that runs yt-dlp on THIS machine (home/residential IP, so YouTube's
+ * datacenter blocking doesn't apply) and uploads to the same S3 key. Same
+ * response shape as postCloudDownloader, so a poll loop can swap it in when the
+ * cloud download can't get the video. Remove with the rest of the local
+ * fallback once the proxy path is reliable.
+ */
+async function postLocalDownload(payload: {
+  youtube_url: string;
+  s3_key: string;
+  audio_only?: boolean;
+}): Promise<{ httpStatus: number; data: CloudDownloaderResponse; body: string }> {
+  const response = await fetch(env.LOCAL_DOWNLOAD_ENDPOINT!, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    // Local machine — no cloud timeout worries; 30 min covers a long video.
+    signal: AbortSignal.timeout(30 * 60 * 1000),
+  });
+  const body = await response.text();
+  let data: CloudDownloaderResponse = {};
+  try {
+    data = JSON.parse(body) as CloudDownloaderResponse;
+  } catch {
+    // Keep the raw body for the error reported to the job record.
   }
   return { httpStatus: response.status, data, body };
 }

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { WifiOff } from "lucide-react";
-import { toast } from "sonner";
+import { WifiOff } from "lucide-react"; // offline glyph for the sticky banner
+import { toast } from "sonner"; // app-wide toast host lives in the root layout
 
 /**
  * Global connectivity watcher. Shows a sticky banner while offline and a
@@ -14,12 +14,14 @@ export function NetworkStatus() {
   useEffect(() => {
     setOffline(!navigator.onLine);
 
+    // Both toasts share one id ("network-status") so the "back online" toast
+    // replaces the persistent offline one instead of stacking a second toast.
     const handleOffline = () => {
       setOffline(true);
       toast.error("You're offline", {
         description: "Uploads and processing are paused until you reconnect.",
         id: "network-status",
-        duration: Infinity,
+        duration: Infinity, // stays until reconnect (handleOnline replaces it)
       });
     };
     const handleOnline = () => {

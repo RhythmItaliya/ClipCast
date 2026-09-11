@@ -1,5 +1,9 @@
 "use client";
 
+// App toast host: thin wrapper around the `sonner` Toaster, mounted once so any
+// component can fire `toast(...)`. Reads the active theme from next-themes and
+// maps sonner's toast slots (success/error/warning/etc.) onto our design tokens.
+
 import { useTheme } from "next-themes";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 

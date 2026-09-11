@@ -4,6 +4,10 @@ import { getAdminPurchases, getAdminRevenueStats } from "~/actions/admin";
 import { BillingTable } from "~/components/admin/billing-table";
 import { formatCents } from "~/lib/utils";
 
+/**
+ * Admin billing — revenue summary stats plus a paginated table of every
+ * credit-pack purchase across all users.
+ */
 export default async function AdminBillingPage({
   searchParams,
 }: {

@@ -21,6 +21,12 @@ const MODE_STYLES: Record<string, string> = {
   any: "bg-purple-500/10 text-purple-600",
 };
 
+/**
+ * Admin clips table: paginated list of every rendered clip across all users,
+ * with a per-row delete. Client component ("use client") because deletion needs
+ * a confirm dialog, a sonner toast, and useTransition to keep the row responsive
+ * while the delete server action runs.
+ */
 export function ClipsTable({
   clips,
   total,

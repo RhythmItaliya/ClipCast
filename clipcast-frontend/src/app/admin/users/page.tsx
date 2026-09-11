@@ -2,6 +2,10 @@ import { Users } from "lucide-react";
 import { getAdminUsers } from "~/actions/admin";
 import { UsersTable } from "~/components/admin/users-table";
 
+/**
+ * Admin users — paginated table of every account, with credit, role, and
+ * ban management handled inside UsersTable.
+ */
 export default async function AdminUsersPage({
   searchParams,
 }: {

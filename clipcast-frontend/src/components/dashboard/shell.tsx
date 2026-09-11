@@ -1,5 +1,12 @@
 "use client";
 
+/**
+ * Dashboard chrome: fixed sidebar + topbar + mobile nav around the routed page
+ * content. Highlights the active nav item, shows the live credit balance, and
+ * handles sign-out. Client component — it reads the current path (usePathname),
+ * subscribes to live-polled credits, and drives the interactive sign-out flow.
+ */
+
 import {
   Coins,
   CreditCard,

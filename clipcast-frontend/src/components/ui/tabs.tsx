@@ -1,5 +1,7 @@
 "use client";
 
+// shadcn/ui Tabs, built on Radix UI Tabs.
+
 import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 

@@ -1,5 +1,12 @@
 "use server";
 
+/**
+ * Account server actions: sign-up, post-login destination resolution, profile
+ * and notification/appearance settings, and account deletion. The actual
+ * sign-in check lives in the NextAuth providers (~/server/auth/config); this
+ * module handles everything around it.
+ */
+
 import { hashPassword } from "~/lib/auth";
 import { homePathForRole } from "~/lib/roles";
 import { signupSchema, type SignupFormValues } from "~/schemas/auth";

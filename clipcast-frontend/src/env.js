@@ -50,6 +50,10 @@ export const env = createEnv({
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     YT_DLP_PATH: z.string().optional(),
     YT_DLP_PROXY: z.string().optional(),
+    // Netscape-format cookies.txt (exported from a signed-in YouTube browser),
+    // pasted as one string. Used by the local yt-dlp fallback to get past
+    // "confirm you're not a bot". Optional — omitted when unset.
+    YT_DLP_COOKIES: z.string().optional(),
     // Optional so the app runs without email configured — sends are
     // logged instead of dispatched until a real key is added.
     RESEND_API_KEY: z.string().optional(),
@@ -57,6 +61,10 @@ export const env = createEnv({
     SMTP_HOST: z.string().optional(),
     SMTP_USER: z.string().optional(),
     SMTP_PASSWORD: z.string().optional(),
+    // 32-byte key (64 hex chars) used to encrypt provider API keys at rest
+    // (AES-256-GCM) so they can be managed from the admin UI. Optional at
+    // startup; key operations throw a clear error if it's missing.
+    SETTINGS_ENCRYPTION_KEY: z.string().optional(),
   },
 
   /**
@@ -103,11 +111,13 @@ export const env = createEnv({
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
     YT_DLP_PATH: process.env.YT_DLP_PATH,
     YT_DLP_PROXY: process.env.YT_DLP_PROXY,
+    YT_DLP_COOKIES: process.env.YT_DLP_COOKIES,
     RESEND_API_KEY: process.env.RESEND_API_KEY,
     EMAIL_FROM: process.env.EMAIL_FROM,
     SMTP_HOST: process.env.SMTP_HOST,
     SMTP_USER: process.env.SMTP_USER,
     SMTP_PASSWORD: process.env.SMTP_PASSWORD,
+    SETTINGS_ENCRYPTION_KEY: process.env.SETTINGS_ENCRYPTION_KEY,
   },
   /**
    * Run `build` or `dev` with `SKIP_ENV_VALIDATION` to skip env validation. This is especially

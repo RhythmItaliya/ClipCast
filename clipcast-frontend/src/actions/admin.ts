@@ -1,23 +1,21 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth } from "~/server/auth";
 import { db } from "~/server/db";
+import {
+  deleteProviderKey,
+  getProviderKeyStatuses,
+  setProviderConfig,
+  type ProviderConfigStatus,
+} from "~/server/provider-keys";
+import { requireAdmin } from "~/server/require-admin";
 import {
   LLM_PROVIDERS,
   getLlmProvider,
   setLlmProviderSetting,
   type LlmProvider,
 } from "~/server/settings";
-
-// ── Guard helper — throws if the caller is not an ADMIN ─────────────────────
-async function requireAdmin() {
-  const session = await auth();
-  if (!session?.user?.id || session.user.role !== "ADMIN") {
-    throw new Error("Unauthorized: admin access required.");
-  }
-  return { id: session.user.id, email: session.user.email ?? "" };
-}
+import { LLM_EFFORTS, PROVIDERS_WITH_EFFORT } from "~/lib/llm-providers";
 
 /** Best-effort audit trail write — never let a logging failure fail the mutation. */
 async function logAdminAction(
@@ -54,6 +52,110 @@ export async function setLlmProvider(
   await setLlmProviderSetting(provider);
   await logAdminAction(admin, "set_llm_provider", "setting", "llm_provider", provider);
   revalidatePath("/admin");
+  revalidatePath("/admin/providers");
+  return { success: true };
+}
+
+// ── Provider API keys ─────────────────────────────────────────────────────────
+
+/** Config status for every provider (admin-only). Never returns the API key. */
+export async function getProviderKeys(): Promise<ProviderConfigStatus[]> {
+  await requireAdmin();
+  return getProviderKeyStatuses();
+}
+
+/** Store (encrypted) an API key for a provider. Live — the next job uses it. */
+export async function saveProviderApiKey(
+  provider: LlmProvider,
+  apiKey: string,
+): Promise<{ success: boolean; error?: string }> {
+  const admin = await requireAdmin();
+  if (!LLM_PROVIDERS.includes(provider)) {
+    return { success: false, error: "Invalid provider." };
+  }
+  if (typeof apiKey !== "string" || apiKey.trim().length < 8) {
+    return { success: false, error: "That key looks too short." };
+  }
+  try {
+    // Only touches the key; model/effort/baseUrl are preserved by the merge.
+    await setProviderConfig(provider, { apiKey });
+  } catch (err) {
+    // Most likely SETTINGS_ENCRYPTION_KEY is missing/invalid.
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Couldn't save the key.",
+    };
+  }
+  await logAdminAction(admin, "provider_key.set", "setting", provider);
+  revalidatePath("/admin/providers");
+  return { success: true };
+}
+
+/**
+ * Save a provider's non-secret settings — model id, effort (Claude only), and a
+ * custom endpoint/base URL. Never touches the API key. A blank field clears it
+ * (the backend falls back to its default). Live — the next job uses them.
+ */
+export async function saveProviderConfig(
+  provider: LlmProvider,
+  config: { model?: string; effort?: string; baseUrl?: string },
+): Promise<{ success: boolean; error?: string }> {
+  const admin = await requireAdmin();
+  if (!LLM_PROVIDERS.includes(provider)) {
+    return { success: false, error: "Invalid provider." };
+  }
+
+  const model = (config.model ?? "").trim();
+  const baseUrl = (config.baseUrl ?? "").trim();
+  let effort = (config.effort ?? "").trim();
+
+  if (model.length > 100) {
+    return { success: false, error: "That model id looks too long." };
+  }
+  if (baseUrl) {
+    let ok = false;
+    try {
+      const u = new URL(baseUrl);
+      ok = u.protocol === "http:" || u.protocol === "https:";
+    } catch {
+      ok = false;
+    }
+    if (!ok) {
+      return { success: false, error: "Endpoint must be a valid http(s) URL." };
+    }
+  }
+  // Effort only applies to providers that support it (Anthropic). Ignore it for
+  // the others, and reject an unknown value.
+  if (!PROVIDERS_WITH_EFFORT.includes(provider)) {
+    effort = "";
+  } else if (effort && !(LLM_EFFORTS as readonly string[]).includes(effort)) {
+    return { success: false, error: "Invalid effort level." };
+  }
+
+  try {
+    await setProviderConfig(provider, { model, effort, baseUrl });
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Couldn't save settings.",
+    };
+  }
+  await logAdminAction(admin, "provider_config.set", "setting", provider);
+  revalidatePath("/admin/providers");
+  return { success: true };
+}
+
+/** Remove a provider's stored API key. */
+export async function removeProviderApiKey(
+  provider: LlmProvider,
+): Promise<{ success: boolean; error?: string }> {
+  const admin = await requireAdmin();
+  if (!LLM_PROVIDERS.includes(provider)) {
+    return { success: false, error: "Invalid provider." };
+  }
+  await deleteProviderKey(provider);
+  await logAdminAction(admin, "provider_key.remove", "setting", provider);
+  revalidatePath("/admin/providers");
   return { success: true };
 }
 

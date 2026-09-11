@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Global error boundary (Next.js `global-error.tsx`) — the last-resort fallback
+ * that catches errors in the ROOT layout itself. Because that layout failed, it
+ * renders its own <html>/<body> and imports global styles directly.
+ */
 import "~/styles/globals.css";
 
 import { RefreshCw, TriangleAlert } from "lucide-react";

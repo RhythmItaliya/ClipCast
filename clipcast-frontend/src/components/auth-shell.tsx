@@ -2,7 +2,11 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { LogoMark, Wordmark } from "~/components/brand";
 
-/** Split-panel auth layout — ClipCast_by_me design. */
+/**
+ * Split-panel layout shared by the login and signup pages: a marketing/brand
+ * panel on the left (hidden on small screens) and the auth form (children) on
+ * the right. Server component — no interactivity of its own.
+ */
 export function AuthShell({ children }: { children: ReactNode }) {
   return (
     <div className="bg-background text-foreground min-h-screen">

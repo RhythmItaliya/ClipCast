@@ -17,6 +17,7 @@ import { resetAllStuckJobs, resetSingleJob } from "~/actions/admin";
 import { useConfirm } from "~/components/ui/confirm-dialog";
 import type { AdminJob } from "~/types";
 
+// Badge label + color + icon per job status; unknown statuses fall back to "failed".
 const STATUS_STYLES: Record<string, { label: string; classes: string; icon: React.ReactNode }> = {
   queued: {
     label: "Queued",
@@ -40,6 +41,12 @@ const STATUS_STYLES: Record<string, { label: string; classes: string; icon: Reac
   },
 };
 
+/**
+ * Admin jobs table: every processing job across all users, filterable by status,
+ * with single- and bulk-"reset stuck" recovery. Client component — the status
+ * filter tabs, confirm dialogs, toasts, and job-reset actions all need
+ * interactivity.
+ */
 export function JobsTable({
   jobs,
   total,

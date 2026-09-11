@@ -1,3 +1,5 @@
+// Route-level loading UI — Next.js Suspense fallback shown while the billing
+// page's server data loads.
 import { AdminStatGridSkeleton, AdminTableSkeleton } from "~/components/skeletons";
 
 export default function Loading() {

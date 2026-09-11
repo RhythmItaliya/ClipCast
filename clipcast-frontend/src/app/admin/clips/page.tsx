@@ -2,6 +2,10 @@ import { Film } from "lucide-react";
 import { getAdminClips } from "~/actions/admin";
 import { ClipsTable } from "~/components/admin/clips-table";
 
+/**
+ * Admin clips — paginated table of every rendered clip across all users.
+ * Deleting here removes the DB record only; the S3 file is left in place.
+ */
 export default async function AdminClipsPage({
   searchParams,
 }: {

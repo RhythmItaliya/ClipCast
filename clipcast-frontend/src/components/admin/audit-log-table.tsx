@@ -10,6 +10,7 @@ export type AdminAuditEntry = {
   createdAt: Date;
 };
 
+// Per-action badge colors; unknown actions fall back to a neutral badge.
 const ACTION_STYLES: Record<string, string> = {
   "credits.adjust": "bg-brand-soft text-brand",
   "user.ban": "bg-destructive/10 text-destructive",
@@ -21,6 +22,11 @@ const ACTION_STYLES: Record<string, string> = {
   "clip.delete": "bg-destructive/10 text-destructive",
 };
 
+/**
+ * Admin audit-log table: paginated, read-only trail of every admin action
+ * (who did it, target, detail, when). Presentational server component — the
+ * only interactivity is the prev/next page links.
+ */
 export function AuditLogTable({
   entries,
   total,

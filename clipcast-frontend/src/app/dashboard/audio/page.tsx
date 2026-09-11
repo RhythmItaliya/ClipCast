@@ -1,3 +1,7 @@
+/**
+ * Audio Studio page — auth-guards the route, then hands off to the client
+ * component that drives music generation and mashups.
+ */
 import { redirect } from "next/navigation";
 import { AudioStudioClient } from "~/components/dashboard/audio-studio-client";
 import { auth } from "~/server/auth";

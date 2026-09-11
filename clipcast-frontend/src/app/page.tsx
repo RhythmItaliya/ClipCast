@@ -1,3 +1,7 @@
+/**
+ * Root route ("/") — renders no UI of its own. Sends unauthenticated visitors
+ * to /login and signed-in users to their role's home (dashboard vs admin).
+ */
 import { redirect } from "next/navigation";
 import { homePathForRole } from "~/lib/roles";
 import { auth } from "~/server/auth";

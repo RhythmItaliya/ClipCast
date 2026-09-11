@@ -1,5 +1,13 @@
 "use server";
 
+/**
+ * Audio Studio server actions (docs/14): validate input, gate on
+ * credits/usage/concurrency, create the job row, and fire the Inngest event the
+ * mixer picks up. Two entry points — `createGeneratedTrack` (prompt -> original
+ * music) and `createAdvancedMix` / `createMashup` (blend YouTube + uploaded
+ * sources) — plus a presigned-upload helper for user-provided audio files.
+ */
+
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v4 as uuidv4 } from "uuid";
@@ -148,6 +156,9 @@ export async function generateAudioSourceUploadUrl(fileInfo: {
       Key: key,
       ContentType: fileInfo.contentType,
     });
+    // Presigned PUT: the browser uploads straight to S3, so large audio files
+    // never pass through the Next.js server. 10800s (3h) of headroom for slow
+    // connections, matching the video-upload URL in ~/actions/s3.
     const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 10800 });
     return { success: true, signedUrl, key };
   } catch (err) {

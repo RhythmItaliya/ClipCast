@@ -1,5 +1,7 @@
 "use client";
 
+// shadcn/ui Label, built on Radix UI Label (adds disabled-peer styling).
+
 import * as React from "react";
 import * as LabelPrimitive from "@radix-ui/react-label";
 

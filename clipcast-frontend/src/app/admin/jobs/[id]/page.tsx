@@ -5,6 +5,11 @@ import { getAdminJob } from "~/actions/admin";
 import { ProductionRoom } from "~/components/dashboard/production-room";
 import type { ProductionLogEntry } from "~/types";
 
+/**
+ * Admin job-detail page — the "why did this job do what it did?" view.
+ * Shows job metadata (who/what/when), the processing summary, full error
+ * context on failure, and the AI crew's step-by-step production log.
+ */
 export const metadata = { title: "Job detail — Admin" };
 
 function Field({ label, value }: { label: string; value: React.ReactNode }) {

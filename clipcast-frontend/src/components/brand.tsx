@@ -1,7 +1,10 @@
+// Brand primitives: logo, wordmark, and the OAuth/YouTube brand icons reused
+// across auth pages, headers and buttons. Kept in one place so the visual
+// identity stays consistent. Server-safe (no client hooks).
 import { Scissors } from "lucide-react";
-import { cn } from "~/lib/utils";
+import { cn } from "~/lib/utils"; // Tailwind class merge helper
 
-/** ClipCast logo mark — brand square with scissors (ClipCast_by_me design). */
+/** ClipCast logo mark — brand-coloured rounded square with a scissors glyph. */
 export function LogoMark({ className }: { className?: string }) {
   return (
     <span
@@ -54,6 +57,7 @@ export function YoutubeIcon({ className }: { className?: string }) {
   );
 }
 
+/** Google "G" mark (inline multi-colour SVG) for the Google OAuth button. */
 export function GoogleIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={cn("h-4 w-4", className)}>
@@ -77,6 +81,7 @@ export function GoogleIcon({ className }: { className?: string }) {
   );
 }
 
+/** Discord mark (inline SVG) for the Discord OAuth button. */
 export function DiscordIcon({ className }: { className?: string }) {
   return (
     <svg

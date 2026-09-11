@@ -11,12 +11,18 @@ export type AdminPurchase = {
   user: { id: string; email: string; name: string | null };
 };
 
+// Per-pack badge colors; unknown packs fall back to a neutral badge.
 const PACK_STYLES: Record<string, string> = {
   small: "bg-blue-500/10 text-blue-600",
   medium: "bg-brand-soft text-brand",
   large: "bg-purple-500/10 text-purple-600",
 };
 
+/**
+ * Admin billing table: paginated list of credit-pack purchases (buyer, pack,
+ * credits, amount, date). Presentational server component; `formatCents` renders
+ * Stripe's minor-unit amounts as a localized currency string.
+ */
 export function BillingTable({
   purchases,
   total,

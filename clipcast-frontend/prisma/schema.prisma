@@ -290,3 +290,16 @@ model AppSetting {
   value     String
   updatedAt DateTime @updatedAt
 }
+
+/// Encrypted per-provider LLM API keys, managed from the admin AI Providers
+/// page. Stored with AES-256-GCM (ciphertext/iv/authTag); plaintext is never
+/// persisted or returned to the client. `last4` is kept for display only. The
+/// active provider's key is decrypted at job dispatch and passed to Modal.
+model ProviderKey {
+  provider   String   @id // deepseek | gemini | claude | openai
+  ciphertext String
+  iv         String
+  authTag    String
+  last4      String?
+  updatedAt  DateTime @updatedAt
+}

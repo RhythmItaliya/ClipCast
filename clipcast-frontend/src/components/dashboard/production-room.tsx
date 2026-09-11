@@ -1,3 +1,11 @@
+/**
+ * Production Room — renders the AI production crew's decision trail for a job.
+ * Entries are grouped by round; each shows which agent made a choice (from → to),
+ * whether a real model or the deterministic fallback produced it, the chosen
+ * parameters, and the model's rationale. Purely presentational (no state or
+ * effects), so it stays a server component.
+ */
+
 import { ArrowRight, Clapperboard } from "lucide-react";
 import type { ProductionLogEntry } from "~/types";
 
@@ -62,6 +70,8 @@ export function ProductionRoom({
     );
   }
 
+  // Distinct round numbers, ascending — the crew can re-run rounds (redo loop),
+  // so we render each round as its own labelled group.
   const rounds = [...new Set(entries.map((e) => e.round))].sort((a, b) => a - b);
 
   return (

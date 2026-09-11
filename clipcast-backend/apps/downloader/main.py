@@ -187,10 +187,6 @@ def _run_yt_dlp(
         "yt_dlp",
         "--proxy", proxy,
         "--js-runtimes", "deno",
-        # Use the iOS player client — YouTube treats it differently from the
-        # web client and does NOT require "Sign in to confirm you're not a bot"
-        # for most videos. Falls back to mweb if ios fails.
-        "--extractor-args", "youtube:player_client=ios,mweb",
         "--no-playlist",
         "--no-progress",
         "--retries", "4",
@@ -199,10 +195,16 @@ def _run_yt_dlp(
         "--concurrent-fragments", "4",
         "--sleep-requests", "1",
     ]
-    # Optional cookie auth (see _build_cookies_args). Passes --cookies <file>
-    # when YT_DLP_COOKIES secret is set; otherwise omitted entirely.
+    # Player client depends on whether we're signed in (cookies present):
+    #  • With cookies -> use yt-dlp's default (web) clients, which serve the full
+    #    quality ladder (720p+). The ios/mweb clients would cap us at ~360p
+    #    because their higher formats need a GVS PO Token.
+    #  • Without cookies -> force ios,mweb, which does NOT trigger "Sign in to
+    #    confirm you're not a bot" for most videos (at 360p).
     if cookies_args:
         command += cookies_args
+    else:
+        command += ["--extractor-args", "youtube:player_client=ios,mweb"]
     if audio_only:
         # Grab the best audio-only stream in its native container (no re-encode,
         # no video, no merge) — the mixer re-extracts to 44.1 kHz wav anyway.
@@ -278,19 +280,24 @@ def download_youtube_video_worker(youtube_url: str, s3_key: str, audio_only: boo
         print("Cookie auth enabled (YT_DLP_COOKIES is set)")
 
     try:
+        # Proxy order: try the paid residential proxy first (if configured),
+        # then fall back to the ranked free proxies. So a paid-proxy hiccup
+        # doesn't fail the whole job, and a paid-only deploy (empty free list)
+        # still just uses the paid one.
+        proxies = []
         if paid_proxy:
-            proxies = [paid_proxy]
-        else:
-            proxies = _load_free_proxies()
-            if not proxies:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail=(
-                        "The free-proxy list isn't ready yet (it refreshes every "
-                        "15 minutes). Retry in a few minutes, or set YT_DLP_PROXY "
-                        "to a residential proxy for reliability."
-                    ),
-                )
+            proxies.append(paid_proxy)
+        proxies.extend(_load_free_proxies())
+        if not proxies:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "No proxies available: the free-proxy list isn't ready yet "
+                    "(it refreshes every 15 minutes) and YT_DLP_PROXY isn't set. "
+                    "Retry in a few minutes, or set YT_DLP_PROXY to a residential "
+                    "proxy for reliability."
+                ),
+            )
 
         last_error = "Unknown yt-dlp failure"
         attempt = 0

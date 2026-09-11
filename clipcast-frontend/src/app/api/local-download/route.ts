@@ -52,6 +52,21 @@ function resolveYtDlp(): string {
   return "yt-dlp"; // fall through to PATH
 }
 
+/**
+ * Find a JavaScript runtime yt-dlp can use to solve YouTube's "n challenge"
+ * (needed for most video formats). Returns the runtime name (deno/node/bun) if
+ * one is on PATH, else null so we simply omit the flag rather than forcing a
+ * runtime that isn't installed (which makes yt-dlp error out immediately).
+ */
+function resolveJsRuntime(): string | null {
+  for (const rt of ["deno", "node", "bun"]) {
+    for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+      if (dir && fs.existsSync(path.join(dir, rt))) return rt;
+    }
+  }
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   // Safety guard: this endpoint must never be reachable in production.
   // LOCAL_DOWNLOAD_ENDPOINT should never be set to a public URL.
@@ -87,13 +102,22 @@ export async function POST(req: NextRequest) {
   const ytDlp = resolveYtDlp();
 
   try {
-    // Build yt-dlp args — mirror of the Modal worker's _run_yt_dlp(),
-    // but running locally so no proxy is needed (your machine's IP works fine).
+    // Cookie auth first — it decides the player-client choice below. YT_DLP_COOKIES
+    // may be EITHER a path to a Netscape cookies.txt OR the file's contents pasted
+    // inline; a path is cleaner for local dev (no multiline value in .env).
+    let cookiesPath: string | null = null;
+    const rawCookies = env.YT_DLP_COOKIES?.trim();
+    if (rawCookies) {
+      if (fs.existsSync(rawCookies)) {
+        cookiesPath = rawCookies; // it's a file path
+      } else {
+        cookiesPath = path.join(tmpDir, "yt_cookies.txt");
+        fs.writeFileSync(cookiesPath, env.YT_DLP_COOKIES!);
+      }
+    }
+
+    // Build yt-dlp args — mirror of the Modal worker's _run_yt_dlp().
     const args: string[] = [
-      // TEMP: no proxy — local machine IP is not blocked by YouTube.
-      "--no-proxy",
-      "--js-runtimes", "deno",
-      "--extractor-args", "youtube:player_client=ios,mweb",
       "--no-playlist",
       "--no-progress",
       "--retries", "3",
@@ -101,6 +125,38 @@ export async function POST(req: NextRequest) {
       "--socket-timeout", "30",
       "--write-info-json",
     ];
+
+    // Player client depends on whether we're signed in:
+    //  • With cookies → let yt-dlp use its default (web) clients, which serve
+    //    the full quality ladder (720p+). Forcing ios/mweb here would cap us at
+    //    360p because those clients need a GVS PO Token for higher formats.
+    //  • Without cookies → force ios,mweb, which dodges "confirm you're not a
+    //    bot" (at the cost of only offering the 360p progressive format).
+    if (!cookiesPath) {
+      args.push("--extractor-args", "youtube:player_client=ios,mweb");
+    }
+
+    // JS runtime for YouTube's "n challenge". Only add the flag if a runtime is
+    // actually installed — forcing one that's missing makes yt-dlp error out.
+    const jsRuntime = resolveJsRuntime();
+    if (jsRuntime) {
+      args.push("--js-runtimes", jsRuntime);
+    } else {
+      console.warn(
+        "[local-download] No JS runtime (deno/node/bun) found — some formats " +
+          "may be unavailable. Install one, or set YT_DLP_COOKIES.",
+      );
+    }
+
+    // Proxy: usually the local machine's home IP works fine (YouTube blocks
+    // datacenter IPs, not residential), so disable any ambient proxy with an
+    // empty --proxy. If YT_DLP_PROXY is set (home IP rate-limited), use it.
+    // NOTE: yt-dlp has no "--no-proxy" flag; empty --proxy is how you opt out.
+    args.push("--proxy", env.YT_DLP_PROXY ?? "");
+
+    if (cookiesPath) {
+      args.push("--cookies", cookiesPath);
+    }
 
     if (audioOnly) {
       args.push("-f", "bestaudio/best");

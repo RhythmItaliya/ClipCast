@@ -2,6 +2,7 @@ import {
   Activity,
   AlertTriangle,
   Coins,
+  Cpu,
   Film,
   ListChecks,
   ShieldOff,
@@ -9,19 +10,18 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
-import {
-  getAdminRevenueStats,
-  getAdminStats,
-  getLlmProviderSetting,
-} from "~/actions/admin";
-import { AiProviderSetting } from "~/components/admin/ai-provider-setting";
+import { getAdminRevenueStats, getAdminStats } from "~/actions/admin";
 import { formatCents } from "~/lib/utils";
 
+/**
+ * Admin overview — the /admin landing page.
+ * Server component that fetches platform-wide stats + revenue in parallel and
+ * renders them as clickable stat cards plus quick-action shortcuts.
+ */
 export default async function AdminOverviewPage() {
-  const [stats, revenue, llmProvider] = await Promise.all([
+  const [stats, revenue] = await Promise.all([
     getAdminStats(),
     getAdminRevenueStats(),
-    getLlmProviderSetting(),
   ]);
 
   return (
@@ -33,8 +33,6 @@ export default async function AdminOverviewPage() {
           Live snapshot of all users, jobs, and clips on ClipCast.
         </p>
       </div>
-
-      <AiProviderSetting current={llmProvider} />
 
       {/* Stat grid */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
@@ -101,6 +99,16 @@ export default async function AdminOverviewPage() {
           <QuickLink
             href="/admin/jobs?status=processing"
             label="Active Jobs"
+            icon={<Activity className="size-3.5" />}
+          />
+          <QuickLink
+            href="/admin/providers"
+            label="AI Providers"
+            icon={<Cpu className="size-3.5" />}
+          />
+          <QuickLink
+            href="/admin/health"
+            label="Services"
             icon={<Activity className="size-3.5" />}
           />
         </div>

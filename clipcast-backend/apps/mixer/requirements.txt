@@ -58,7 +58,12 @@ pedalboard>=0.9.0
 # transformers MusicGen is the codepath here because it is the most reliable to
 # deploy unattended. To move to the commercially-safe ACE-Step (Apache-2.0, see
 # docs/14), swap `_generate_music()` — the rest of the pipeline is unchanged.
-transformers>=4.44.0,<5.0
+# Cap below 4.49: transformers 4.49+ added the CVE-2025-32434 mitigation that
+# makes torch.load refuse to run on torch < 2.6 for non-safetensors checkpoints
+# (facebook/musicgen-medium ships .bin weights), which 502s the generate worker.
+# We're pinned to torch 2.4.1 here, so stay on the pre-gate line. MusicGen is
+# stable on 4.44-4.48. (Alternative: bump torch>=2.6 in lockstep — heavier.)
+transformers>=4.44.0,<4.49
 accelerate>=0.33.0
 
 # (Melody re-instrumentation deps — basic-pitch/pretty_midi/pyfluidsynth — are

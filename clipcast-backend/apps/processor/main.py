@@ -53,8 +53,19 @@ class ProcessVideoRequest(BaseModel):
     # nothing is hardcoded.
     watermark_text: str | None = None
     # Which LLM drives the AI crew (Colorist etc.): "deepseek" (default) |
-    # "gemini" | "claude". Set from the admin AI-provider setting, per job.
+    # "gemini" | "claude" | "openai". Set from the admin AI-provider setting,
+    # per job.
     llm_provider: str | None = None
+    # The admin's own API key for the chosen provider, sent per job. It is
+    # stored encrypted in the app DB and overrides the Modal secret for that
+    # provider. None means "use the key from the Modal secret instead".
+    llm_api_key: str | None = None
+    # More per-provider config from the admin panel, sent per job (all optional):
+    # the model id, the Anthropic effort (Claude only), and a custom base URL so
+    # the provider can point at a compatible gateway. None → backend defaults.
+    llm_model: str | None = None
+    llm_effort: str | None = None
+    llm_base_url: str | None = None
 
 
 CLIP_MODE_PROMPTS = {
@@ -853,13 +864,23 @@ class ClipCast:
         self.gemini_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         print("Created gemini client...")
 
-    def _make_llm(self, provider=None):
-        """Build the crew LLM for the chosen provider (deepseek/gemini/claude),
-        passing the warm Gemini client for the gemini path. Falls back across
-        configured providers; None → crew runs on deterministic fallbacks."""
+    def _make_llm(self, provider=None, api_key=None, model=None, effort=None, base_url=None):
+        """Build the crew LLM for the chosen provider.
+
+        provider: which LLM to use — "deepseek" (default), "gemini", "claude"
+                  or "openai". Chosen by the admin and sent per job.
+        api_key/model/effort/base_url: the admin's per-provider config for that
+                  provider (from the encrypted DB). Each overrides the backend
+                  default; None → use the default. `effort` is Claude-only.
+        Falls back across configured providers; None → the crew runs on its
+        deterministic (non-AI) fallbacks."""
+        # Pass the warm Gemini client so the "gemini" path can reuse it.
         from llm_providers import make_llm
 
-        return make_llm(provider, getattr(self, "gemini_client", None))
+        return make_llm(
+            provider, getattr(self, "gemini_client", None), api_key,
+            model=model, effort=effort, base_url=base_url,
+        )
 
     def _get_hf_fallback(self):
         """Lazily load the HF fallback model on first use only.
@@ -1327,7 +1348,11 @@ class ClipCast:
                     else:
                         fallback_hex = _category_highlight_hex(moment.get("category")) or "#6366F1"
                         pres, clip_log = plan_clip_presentation(
-                            self._make_llm(request.llm_provider),
+                            self._make_llm(
+                                request.llm_provider, request.llm_api_key,
+                                request.llm_model, request.llm_effort,
+                                request.llm_base_url,
+                            ),
                             {
                                 "title": moment["title"],
                                 "category": moment.get("category"),

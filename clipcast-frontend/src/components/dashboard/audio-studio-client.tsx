@@ -1,4 +1,11 @@
-"use client";
+/**
+ * Audio Studio — interactive client form for the two music-production modes.
+ * "AI Mix" combines up to 6 YouTube links / uploaded audio files into a
+ * beat-matched, hook-detected clip; "Compose" generates an original track from
+ * a text prompt. Both submit to server actions in ~/actions/audio and drop the
+ * job into the processing queue.
+ */
+"use client"; // stateful form + client-side S3 uploads → must run in the browser
 
 import {
   ChevronDown,
@@ -86,6 +93,8 @@ type LocalSource = {
   s3Key?: string;
 };
 
+// Builds a blank source row with a stable local id (used as the React key).
+// Falls back to a timestamp id where crypto.randomUUID is unavailable.
 function newSource(kind: "youtube" | "s3" = "youtube"): LocalSource {
   const id =
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -104,6 +113,8 @@ function newSource(kind: "youtube" | "s3" = "youtube"): LocalSource {
 
 export function AudioStudioClient() {
   const router = useRouter();
+  // useTransition keeps the form responsive while the submit server action runs;
+  // `uploading` covers the separate step of pushing local files to S3 first.
   const [pending, startTransition] = useTransition();
   const [uploading, setUploading] = useState(false);
 
@@ -153,6 +164,9 @@ export function AudioStudioClient() {
     }
   }
 
+  // Normalizes the local source rows into the server action's input shape.
+  // YouTube rows pass their URL through; file rows are uploaded straight to S3
+  // via a presigned PUT (skipped if already uploaded) and pass their S3 key.
   async function prepareMixSources(): Promise<AudioSourceInput[]> {
     const prepared: AudioSourceInput[] = [];
     for (const source of sources) {
@@ -525,6 +539,8 @@ function SettingsCard({
   );
 }
 
+// Native <select> styled to match the design system: appearance-none hides the
+// browser's default arrow, replaced by a lucide ChevronDown layered on top.
 function StyledSelect({
   id,
   value,
@@ -555,6 +571,8 @@ function StyledSelect({
   );
 }
 
+// One source row in the AI Mix panel: switch between a YouTube URL and a local
+// file upload, choose the stem role, or remove the row.
 function SourceRow({
   source,
   index,

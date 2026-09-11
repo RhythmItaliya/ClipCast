@@ -1,3 +1,5 @@
+// shadcn/ui Skeleton — a pulsing placeholder block for loading states.
+
 import { cn } from "~/lib/utils";
 
 function Skeleton({

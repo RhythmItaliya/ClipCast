@@ -1,4 +1,11 @@
-"use client";
+/**
+ * Clips library grid. Renders finished outputs grouped by their source video —
+ * each group is a collapsible section — with play / download / delete per clip
+ * and, for video clips when a YouTube account is connected, a "Post to YouTube"
+ * modal. Also handles audio-only Audio Studio outputs (mashups / generated
+ * tracks), which play in an <audio> element and hide the YouTube action.
+ */
+"use client"; // media playback, presigned-URL fetches, and modals are client-side
 
 import {
   ChevronDown,
@@ -49,6 +56,7 @@ const THUMB_GRADIENTS = [
   "from-lime-500 via-emerald-500 to-teal-500",
 ];
 
+/** Top-level grid: renders the source groups plus pagination, or an empty state. */
 export function ClipsGrid({
   groups,
   youtubeConnected = false,
@@ -142,6 +150,7 @@ function Pagination({
   );
 }
 
+/** A collapsible section for one source video and the clips derived from it. */
 function VideoGroupSection({
   group,
   youtubeConnected,

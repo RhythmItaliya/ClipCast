@@ -86,9 +86,17 @@ class ProcessAudioRequest(BaseModel):
     # mixer pick the lane from the sources; any preset overrides it. Same preset
     # vocabulary as the generate genres (see GENRE_PRESETS / decide_mix_style).
     target_genre: str | None = None
-    # Which LLM drives the AI crew: "deepseek" (default) | "gemini" | "claude".
-    # Set from the admin AI-provider setting and passed per job (live switch).
+    # Which LLM drives the AI crew: "deepseek" (default) | "gemini" | "claude"
+    # | "openai". Set from the admin AI-provider setting, passed per job.
     llm_provider: str | None = None
+    # Per-provider config from the admin panel, sent per job (all optional): the
+    # admin's API key (stored encrypted, overrides the Modal secret), the model
+    # id, the Anthropic effort (Claude only), and a custom base URL so the
+    # provider can point at a compatible gateway. None → backend defaults.
+    llm_api_key: str | None = None
+    llm_model: str | None = None
+    llm_effort: str | None = None
+    llm_base_url: str | None = None
     # TODO(audio, MUSIC_QUALITY_PROBLEMS P0.3): add `instrumental_only: bool` —
     # when set, force every part's tune_only=True (drop the vocal overlay) so a
     # user can request a pure instrumental mix. Add a UI toggle on the mix tab.
@@ -268,17 +276,24 @@ class ClipCastMixer:
             print(f"lyric transcription failed: {e}")
             return ""
 
-    def _make_llm(self, provider=None):
-        """Build the crew LLM for the chosen provider (deepseek/gemini/claude),
-        passing the warm Gemini client for the gemini path. Falls back across
+    def _make_llm(self, provider=None, api_key=None, model=None, effort=None, base_url=None):
+        """Build the crew LLM for the chosen provider (deepseek/gemini/claude/
+        openai), passing the warm Gemini client for the gemini path. The admin's
+        per-provider config (api_key/model/effort/base_url) overrides the backend
+        defaults for that provider; effort is Claude-only. Falls back across
         configured providers; None → the crew runs on deterministic fallbacks."""
         from llm_providers import make_llm
 
-        return make_llm(provider, getattr(self, "gemini", None))
+        return make_llm(
+            provider, getattr(self, "gemini", None), api_key,
+            model=model, effort=effort, base_url=base_url,
+        )
 
     def _producer_plan(
         self, lyrics: str, genre: str, target_bpm: float, key_name: str,
-        quality: str, provider: str | None = None,
+        quality: str, provider: str | None = None, api_key: str | None = None,
+        model: str | None = None, effort: str | None = None,
+        base_url: str | None = None,
     ):
         """Run the music crew (docs/17 §3a): lyricist → director → composer →
         engineer produce the plan the render consumes, plus the ProductionLog.
@@ -293,7 +308,9 @@ class ClipCastMixer:
             "lyrics": (lyrics or "")[:1500],
         }
         try:
-            return music_plan(self._make_llm(provider), brief)
+            return music_plan(
+                self._make_llm(provider, api_key, model, effort, base_url), brief
+            )
         except Exception as e:  # noqa: BLE001
             print(f"music crew failed, using deterministic plan: {e}")
             mellow = (genre or "").split()[0] in {"lofi", "ambient", "cinematic"}
@@ -561,7 +578,8 @@ class ClipCastMixer:
         lead_quality = "minor" if built[0]["is_minor"] else "major"
         plan, production_log = self._producer_plan(
             lyrics, style_label, target_bpm, lead_key, lead_quality,
-            provider=req.llm_provider,
+            provider=req.llm_provider, api_key=req.llm_api_key,
+            model=req.llm_model, effort=req.llm_effort, base_url=req.llm_base_url,
         )
         director_prompt = plan["bed_prompt"]
         research_note = (
