@@ -1,0 +1,102 @@
+{
+  "harness": "e2e_full_pipeline",
+  "started_at_utc": "2026-09-11T12:56:56.898523+00:00",
+  "finished_at_utc": "2026-09-11T13:02:38.423866+00:00",
+  "total_seconds": 341.5,
+  "overall_status": "PASS",
+  "args": {
+    "url": "https://www.youtube.com/watch?v=arj7oStGLkU",
+    "mode": "highlights",
+    "preview": false,
+    "audio": false,
+    "audio_only": false,
+    "audio_prompt": "upbeat lofi hip hop instrumental, mellow, jazzy keys, relaxed study vibe",
+    "llm_provider": "claude",
+    "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/original.mp4",
+    "timeout": 2700,
+    "no_presign": false
+  },
+  "environment": {
+    "local_download_endpoint": "http://localhost:3000/api/local-download",
+    "process_video_endpoint": "https://littlemovie00--clipcast-clipcast-process-video.modal.run",
+    "process_audio_endpoint": "https://littlemovie00--clipcast-mixer-process-audio.modal.run",
+    "s3_bucket": "my-video-storage-app-281414549138-us-west-2-an",
+    "aws_region": "us-west-2",
+    "boto3_available": true,
+    "python": "3.12.3"
+  },
+  "llm": {
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "medium",
+    "base_url_set": true,
+    "api_key_source": "ANTHROPIC_API_KEY"
+  },
+  "stages": [
+    {
+      "name": "local_download",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "s3_key=test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/original.mp4",
+      "error": ""
+    },
+    {
+      "name": "process_clips",
+      "status": "PASS",
+      "seconds": 340.8,
+      "detail": "found=4, rendered=4",
+      "error": ""
+    },
+    {
+      "name": "verify_clips",
+      "status": "PASS",
+      "seconds": 0.7,
+      "detail": "4 clips, in_window=False, captions_ok=True",
+      "error": ""
+    }
+  ],
+  "clips": [
+    {
+      "index": 0,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_0.mp4",
+      "title": "The Panic Monster: The Only Thing The Monkey Fears",
+      "category": "Highlights",
+      "duration": 17,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_0.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=iweONsZUs6U2KQ5wnOYunEchYS4%3D&Expires=1789135358"
+    },
+    {
+      "index": 1,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_1.mp4",
+      "title": "Welcome to the Dark Playground: Unearned Fun & Guilt",
+      "category": "Highlights",
+      "duration": 26,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_1.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=bSnlDyqLBn0lvbUv1ezRFgN2jFQ%3D&Expires=1789135358"
+    },
+    {
+      "index": 2,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_2.mp4",
+      "title": "No Deadlines? No Panic Monster: The Real Problem",
+      "category": "Highlights",
+      "duration": 17,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_2.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=YcnGT26q7Y%2Bc%2F3PZs54wkBiJHZE%3D&Expires=1789135358"
+    },
+    {
+      "index": 3,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_3.mp4",
+      "title": "The Panic Monster Explains All Insane Procrastination",
+      "category": "Highlights",
+      "duration": 18,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_3.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=fBueCVmhE0MNkr4T4kUJOaDOBv0%3D&Expires=1789135358"
+    }
+  ],
+  "audio": {},
+  "bugs": []
+}

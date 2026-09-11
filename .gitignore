@@ -23,7 +23,6 @@ temp/
 
 # ── Project analysis / generated test artifacts ──────────────
 graphify-out/
-testing/
 
 # ── Generated media / clips ───────────────────────────────────
 *.mp4

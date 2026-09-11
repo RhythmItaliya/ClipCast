@@ -1,0 +1,47 @@
+{
+  "harness": "e2e_full_pipeline",
+  "started_at_utc": "2026-09-11T13:20:19.538620+00:00",
+  "finished_at_utc": "2026-09-11T13:21:03.902062+00:00",
+  "total_seconds": 44.4,
+  "overall_status": "FAIL",
+  "args": {
+    "url": "https://www.youtube.com/watch?v=arj7oStGLkU",
+    "mode": "all",
+    "preview": false,
+    "audio": false,
+    "audio_only": true,
+    "audio_prompt": "upbeat lofi hip hop instrumental, mellow, jazzy keys, relaxed study vibe",
+    "llm_provider": "claude",
+    "s3_key": null,
+    "timeout": 2700,
+    "no_presign": true
+  },
+  "environment": {
+    "local_download_endpoint": "http://localhost:3000/api/local-download",
+    "process_video_endpoint": "https://littlemovie00--clipcast-clipcast-process-video.modal.run",
+    "process_audio_endpoint": "https://littlemovie00--clipcast-mixer-process-audio.modal.run",
+    "s3_bucket": "my-video-storage-app-281414549138-us-west-2-an",
+    "aws_region": "us-west-2",
+    "boto3_available": true,
+    "python": "3.12.3"
+  },
+  "llm": {
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "medium",
+    "base_url_set": true,
+    "api_key_source": "ANTHROPIC_API_KEY"
+  },
+  "stages": [
+    {
+      "name": "audio_generate",
+      "status": "FAIL",
+      "seconds": 44.4,
+      "detail": "",
+      "error": "Mixer poll returned HTTP 502: Audio worker failed: Due to a serious vulnerability issue in `torch.load`, even with `weights_only=True`, we now require users to upgrade torch to at least v2.6 in order to use the function. This version restriction does not apply when loading files with safetensors.\nSee the vulnerability report here https://nvd.nist.gov/vuln/detail/CVE-2025-32434"
+    }
+  ],
+  "clips": [],
+  "audio": {},
+  "bugs": []
+}

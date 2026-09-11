@@ -1,0 +1,162 @@
+{
+  "harness": "e2e_full_pipeline",
+  "started_at_utc": "2026-09-11T13:04:26.716581+00:00",
+  "finished_at_utc": "2026-09-11T13:17:56.862035+00:00",
+  "total_seconds": 810.1,
+  "overall_status": "PASS",
+  "args": {
+    "url": "https://www.youtube.com/watch?v=arj7oStGLkU",
+    "mode": "all",
+    "preview": false,
+    "audio": true,
+    "audio_only": false,
+    "audio_prompt": "upbeat lofi hip hop instrumental, mellow, jazzy keys, relaxed study vibe",
+    "llm_provider": "claude",
+    "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/original.mp4",
+    "timeout": 2700,
+    "no_presign": false
+  },
+  "environment": {
+    "local_download_endpoint": "http://localhost:3000/api/local-download",
+    "process_video_endpoint": "https://littlemovie00--clipcast-clipcast-process-video.modal.run",
+    "process_audio_endpoint": "https://littlemovie00--clipcast-mixer-process-audio.modal.run",
+    "s3_bucket": "my-video-storage-app-281414549138-us-west-2-an",
+    "aws_region": "us-west-2",
+    "boto3_available": true,
+    "python": "3.12.3"
+  },
+  "llm": {
+    "provider": "claude",
+    "model": "claude-opus-4-8",
+    "effort": "medium",
+    "base_url_set": true,
+    "api_key_source": "ANTHROPIC_API_KEY"
+  },
+  "stages": [
+    {
+      "name": "local_download",
+      "status": "SKIP",
+      "seconds": 0.0,
+      "detail": "s3_key=test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/original.mp4",
+      "error": ""
+    },
+    {
+      "name": "process_clips",
+      "status": "PASS",
+      "seconds": 684.6,
+      "detail": "found=10, rendered=10",
+      "error": ""
+    },
+    {
+      "name": "verify_clips",
+      "status": "PASS",
+      "seconds": 0.1,
+      "detail": "10 clips, in_window=False, captions_ok=True",
+      "error": ""
+    }
+  ],
+  "clips": [
+    {
+      "index": 0,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_0.mp4",
+      "title": "The Panic Monster: The Monkey's Only Fear",
+      "category": "Educational",
+      "duration": 17,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_0.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=c5TttpvJSnEyAn4NECdtBxwTp2A%3D&Expires=1789136151"
+    },
+    {
+      "index": 1,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_1.mp4",
+      "title": "Your Life Calendar: What Are You Procrastinating On?",
+      "category": "Educational",
+      "duration": 26,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_1.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=a%2FaawAyV02gobL50%2FSzX8dL82U0%3D&Expires=1789136151"
+    },
+    {
+      "index": 2,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_2.mp4",
+      "title": "How do procrastinators get things done?",
+      "category": "Q&A",
+      "duration": 22,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_2.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=RgYG258wKRm1CIy10VYhjbZF%2Brw%3D&Expires=1789136151"
+    },
+    {
+      "index": 3,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_3.mp4",
+      "title": "The Instant Gratification Monkey takes over!",
+      "category": "Q&A",
+      "duration": 22,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_3.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=tCPJqy4bV0V%2B90RkOg7VT%2FCds10%3D&Expires=1789136151"
+    },
+    {
+      "index": 4,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_4.mp4",
+      "title": "Long-Term Procrastination: The Silent Killer",
+      "category": "Educational",
+      "duration": 17,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_4.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=SmIJdZQntM6%2BcWz8dB5ZTmL16rg%3D&Expires=1789136151"
+    },
+    {
+      "index": 5,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_5.mp4",
+      "title": "The Hidden Cost of Long-Term Procrastination",
+      "category": "Motivational",
+      "duration": 29,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_5.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=Ug4rVTQ0ug2MwK8nu%2Bzr3XcM9cI%3D&Expires=1789136151"
+    },
+    {
+      "index": 6,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_6.mp4",
+      "title": "The YouTube Spiral and Justin Bieber's Mom",
+      "category": "Highlights",
+      "duration": 18,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_6.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=S92LjNbxLW97DJwWfp3mbcft1Yg%3D&Expires=1789136151"
+    },
+    {
+      "index": 7,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_7.mp4",
+      "title": "Why Humans Struggle with Instant Gratification",
+      "category": "Educational",
+      "duration": 30,
+      "in_target_window": true,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_7.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=cicF%2BSix7%2BSYGIh%2Fv4NzyOqdj4A%3D&Expires=1789136151"
+    },
+    {
+      "index": 8,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_8.mp4",
+      "title": "The Procrastinator's System: Not Pretty, But It Works",
+      "category": "Behavioral Insight",
+      "duration": 28,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_8.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=PslCn6cyh23q9%2FTKcuWK%2BaR%2FHVU%3D&Expires=1789136151"
+    },
+    {
+      "index": 9,
+      "s3_key": "test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_9.mp4",
+      "title": "Rational Decisions vs. Instant Gratification",
+      "category": "Educational",
+      "duration": 15,
+      "in_target_window": false,
+      "captions_burned": true,
+      "presigned_url": "https://my-video-storage-app-281414549138-us-west-2-an.s3.amazonaws.com/test-e2e/c69c42d8-68e0-4d67-b867-e2432c1aa5e2/clip_9.mp4?AWSAccessKeyId=AKIAUDBM5H2JMWOLUFYR&Signature=1lidOZBuVbIqxjg2v7wrmIxIb5M%3D&Expires=1789136151"
+    }
+  ],
+  "audio": {},
+  "bugs": []
+}
